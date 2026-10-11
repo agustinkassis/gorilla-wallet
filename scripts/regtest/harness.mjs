@@ -10,7 +10,7 @@ import { once } from 'node:events'
 export async function harness() {
   const root = resolve(import.meta.dirname, '../..')
   const project = `gorila-regtest-${process.pid}-${Date.now()}`
-  const directory = resolve(process.env.REGTEST_EVIDENCE_DIR || join(root, '.omo/evidence', project))
+  const directory = resolve(process.env.REGTEST_EVIDENCE_DIR || join(tmpdir(), project, 'evidence'))
   mkdirSync(directory, { recursive: true })
   const temporary = mkdtempSync(join(tmpdir(), `${project}-`))
   const env = { ...process.env, DATABASE_URL: `file:${join(temporary, 'wallet.db')}`, SEED_PHRASE: '', NODE_ENV: 'test' }

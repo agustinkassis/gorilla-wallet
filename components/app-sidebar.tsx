@@ -53,7 +53,7 @@ export function StatusDot({ on, className }: { on: boolean; className?: string }
 export function AppSidebar() {
   const pathname = usePathname()
   const { setOpenMobile } = useSidebar()
-  const { snapshots, live, chains, chain: active, watchOnly } = useWallet()
+  const { snapshots, live, chains, chain: active } = useWallet()
   const incoming = pendingIncoming({ [active]: snapshots[active] }).length
 
   return (
@@ -67,15 +67,7 @@ export function AppSidebar() {
           <SidebarGroupLabel>Wallet</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {NAV.map((item) =>
-                item.href === "/send" && watchOnly ? (
-                  <SidebarMenuItem key={item.href}>
-                    <SidebarMenuButton disabled tooltip="Send · not available in watch-only wallets" aria-disabled>
-                      <item.icon />
-                      <span>{item.title}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ) : (
+              {NAV.map((item) => (
                 <SidebarMenuItem key={item.href}>
                   <SidebarMenuButton
                     asChild
@@ -96,8 +88,7 @@ export function AppSidebar() {
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
-                ),
-              )}
+              ))}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -125,6 +116,9 @@ export function AppSidebar() {
             )
           })}
         </SidebarMenu>
+        <p className="px-2 font-mono text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
+          Gorilla Wallet v{process.env.APP_VERSION}
+        </p>
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>

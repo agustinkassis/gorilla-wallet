@@ -2,10 +2,10 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { useRouter } from "next/navigation"
-import { nip98 } from "nostr-tools"
 import { toast } from "sonner"
-import { useNostr, waitForNostr } from "@/components/nostr-provider"
+import { useNostr } from "@/components/nostr-provider"
 import { readUnit } from "@/components/units"
+import { authHeaders } from "@/lib/api"
 import { playChime, systemNotify } from "@/lib/notify"
 import {
   CHAINS,
@@ -87,8 +87,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 class Fatal extends Error {}
 
 export function WalletProvider({ children }: { children: React.ReactNode }) {
-  const { pubkey } = useNostr()
-  const [state, setState] = useState<StreamState & { owner?: string }>(EMPTY)
+  const { pubkey, required } = useNostr()
+  const [state, setState] = useState<StreamState & { owner?: string | null }>(EMPTY)
   const [attempt, setAttempt] = useState(0)
   const router = useRouter()
   // Latest loaded snapshot per wallet+chain, read outside setState so notifications fire exactly once per event.
@@ -97,7 +97,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const walletNames = useRef<WalletInfo[]>([])
 
   useEffect(() => {
-    if (!pubkey) return
+    if (required === undefined || (required && !pubkey)) return
     const ac = new AbortController()
     latest.current = {}
     const set = (patch: Partial<StreamState> | ((s: StreamState) => Partial<StreamState>)) =>
@@ -152,15 +152,14 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       for (let delay = 2_000; !ac.signal.aborted; delay = Math.min(delay * 2, 60_000)) {
         try {
           const url = `${location.origin}/api/stream`
-          let auth
+          let headers
           try {
-            const nostr = await waitForNostr()
-            auth = await nip98.getToken(url, "GET", (e) => nostr.signEvent(e), true)
+            headers = await authHeaders(url, "GET")
           } catch {
             throw new Fatal("Couldn't sign the login request. Unlock your Nostr extension and retry.")
           }
-          const res = await fetch(url, { headers: { Authorization: auth }, signal: ac.signal })
-          if (res.status === 403) throw new Fatal("This Nostr account is not authorized to open this wallet.")
+          const res = await fetch(url, { headers, signal: ac.signal })
+          if (res.status === 403) throw new Fatal(required ? "This Nostr account is not authorized to open this wallet." : (await res.json()).error)
           if (res.status === 401) throw new Fatal("Nostr authentication failed. Check your system clock and retry.")
           if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`)
 
@@ -194,7 +193,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     })()
 
     return () => ac.abort()
-  }, [pubkey, attempt, router])
+  }, [pubkey, required, attempt, router])
 
   const selectedId = useSyncExternalStore(subscribeSelected, readSelected, () => null)
   const selectWallet = useCallback((id: string) => {

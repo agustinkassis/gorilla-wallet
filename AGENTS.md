@@ -7,3 +7,8 @@ This version has breaking changes — APIs, conventions, and file structure may 
 This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
 
 <!-- END:nextjs-agent-rules -->
+
+## Releases
+
+To cut a desktop release follow README → Releasing (version bump, `v*` tag, review the draft). Apple signing and
+notarization run in `.github/workflows/desktop.yml`; never ship macOS builds signed any other way.

@@ -63,12 +63,14 @@ export async function GET(req: Request) {
         subs.forEach((u) => u())
         subs.clear()
       }
-      req.signal.addEventListener("abort", () => {
+      const abort = () => {
         cleanup()
         try {
           controller.close()
         } catch {}
-      })
+      }
+      req.signal.addEventListener("abort", abort, { once: true })
+      if (req.signal.aborted) abort()
     },
     cancel() {
       cleanup()

@@ -14,13 +14,13 @@ import { CHAINS, FAMILIES } from "@/lib/wallet"
 
 /** Shows the page only once logged in and authorized; otherwise a connect/error card. */
 export function Gate({ children }: { children: React.ReactNode }) {
-  const { pubkey, login, logout } = useNostr()
+  const { pubkey, required, login, logout } = useNostr()
   const { error, retry, ready, wallets, selectWallet, wallet, account } = useWallet()
 
   // Login state unknown (server render / hydration): pages render their own loading skeletons.
-  if (pubkey === undefined) return children
+  if (pubkey === undefined || required === undefined) return children
 
-  if (!pubkey || error)
+  if ((required && !pubkey) || error)
     return (
       <div className="flex flex-1 items-center justify-center py-12">
         <Card className="w-full max-w-md text-center">
@@ -37,9 +37,11 @@ export function Gate({ children }: { children: React.ReactNode }) {
             {error ? (
               <>
                 <Button onClick={retry}>Retry</Button>
-                <Button variant="outline" onClick={logout}>
-                  Switch account
-                </Button>
+                {required && (
+                  <Button variant="outline" onClick={logout}>
+                    Switch account
+                  </Button>
+                )}
               </>
             ) : (
               <Button onClick={login} className="gap-2">

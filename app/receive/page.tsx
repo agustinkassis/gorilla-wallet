@@ -60,7 +60,7 @@ export default function ReceivePage() {
               <span>
                 {path}/{current.change}/{current.index}
               </span>
-              <LabelEditor chain="all" type="addr" target={current.address} value={label} />
+              <LabelEditor chain={chain} type="addr" target={current.address} value={label} />
             </div>
             <Button variant="ghost" size="icon" disabled={!picked && offset >= maxOffset} onClick={() => step(1)} aria-label="Next unused address">
               <ChevronRightIcon />
@@ -116,7 +116,7 @@ export default function ReceivePage() {
                       >
                         {shorten(a.address, 10)}
                       </button>
-                      <LabelEditor chain="all" type="addr" target={a.address} value={a.label} />
+                      <LabelEditor chain={chain} type="addr" target={a.address} value={a.label} />
                     </div>
                   </TableCell>
                   <TableCell className="pr-4 text-right sm:pr-2">

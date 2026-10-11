@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "@/components/ui/sidebar"
 import { AddWalletDialog } from "@/components/add-wallet"
+import { GorillaLogo } from "@/components/logo"
 import { useWallet } from "@/components/wallet-provider"
 import { UnitLabel, useUnit } from "@/components/units"
 import { CHAINS, FAMILIES, formatAmount, sumBalances, type WalletKind } from "@/lib/wallet"
@@ -47,8 +48,8 @@ export function WalletSwitcher() {
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton size="lg" className="data-[state=open]:bg-sidebar-accent" aria-label="Switch wallet">
-              <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-gradient-to-br from-orange-400 to-violet-500 text-lg shadow-md">
-                <span aria-hidden>🦍</span>
+              <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-[#b20e18] shadow-md">
+                <GorillaLogo className="size-6" />
               </div>
               <div className="grid flex-1 text-left leading-tight">
                 <span className="truncate font-semibold">{wallet?.name ?? "Gorilla Wallet"}</span>

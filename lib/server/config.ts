@@ -17,6 +17,10 @@ export const config = {
   get allowedPubkeys() {
     return list(process.env.ALLOWED_PUBKEYS ?? "")
   },
+  /** optional: Electrum hosts whose ssl:// certificate isn't verified (self-signed servers you trust) */
+  get electrumSelfSigned() {
+    return list(process.env.ELECTRUM_SELF_SIGNED?.toLowerCase() ?? "")
+  },
   /**
    * A chain's sources, first non-empty list wins: Settings → Networks, then .env (BTC_ELECTRUM, MEMPOOL_BTC_URL,
    * TBTC4_ELECTRUM, … comma-separated), then the defaults in lib/chains.ts.

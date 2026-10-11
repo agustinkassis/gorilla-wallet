@@ -13,7 +13,7 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { useWallet } from "@/components/wallet-provider"
 import { api } from "@/lib/api"
-import { DERIVATION_PATH, FAMILIES, normalizeXpub, type Family, type WalletInfo } from "@/lib/wallet"
+import { DERIVATION_PATH, FAMILIES, parseAccountKey, type Family, type WalletInfo } from "@/lib/wallet"
 import { cn } from "@/lib/utils"
 
 type Mode = "choose" | "create" | "words" | "xpub"
@@ -114,12 +114,16 @@ export function AddWalletFlow({ onDone, onCancel }: { onDone: (w: WalletInfo) =>
   const unknown = typed.filter((w) => !WORDS.has(w))
   const wordsValid = validateMnemonic(typed.join(" "), wordlist)
   let xpubError: string | null = null
-  let xpubFamily: Family | undefined
+  let key: ReturnType<typeof parseAccountKey> | undefined
   try {
-    if (xpub.trim()) xpubFamily = normalizeXpub(xpub).family
+    if (xpub.trim()) key = parseAccountKey(xpub)
   } catch (e) {
     xpubError = (e as Error).message
   }
+  const xpubFamily = key?.family
+  // a descriptor / [fingerprint/path]xpub fills these; typing overrides
+  const fpValue = fingerprint || key?.fingerprint || ""
+  const pathValue = xpubPath || key?.path || ""
 
   const submit = async (body: Record<string, unknown>) => {
     setBusy(true)
@@ -160,7 +164,7 @@ export function AddWalletFlow({ onDone, onCancel }: { onDone: (w: WalletInfo) =>
           [
             { mode: "create", icon: SparklesIcon, title: "Create a new wallet", desc: "Generate new recovery words, with an optional passphrase." },
             { mode: "words", icon: KeyRoundIcon, title: "Import recovery words", desc: "Restore from the 12 or 24 BIP39 words you already have." },
-            { mode: "xpub", icon: EyeIcon, title: "Watch-only (xpub)", desc: "Track balances from an xpub/zpub or a testnet tpub/vpub. No keys: sending is disabled." },
+            { mode: "xpub", icon: EyeIcon, title: "Watch-only (xpub)", desc: "Track an xpub or output descriptor. No keys here: sends are signed on your hardware wallet or Sparrow (PSBT)." },
           ] as const
         ).map((o) => (
           <button
@@ -305,7 +309,9 @@ export function AddWalletFlow({ onDone, onCancel }: { onDone: (w: WalletInfo) =>
             label="Account xpub / zpub (mainnet) or tpub / vpub (testnets)"
             hint={
               xpubError ??
-              (xpubFamily ? `Valid ${FAMILIES[xpubFamily].label} key` : "Native SegWit account key, e.g. from Sparrow or a hardware wallet.")
+              (xpubFamily
+                ? `Valid ${FAMILIES[xpubFamily].label} key${key?.fingerprint ? " · fingerprint and path read from it" : ""}`
+                : "Paste the output descriptor from Sparrow or your hardware wallet (it fills the fingerprint), or just the xpub.")
             }
           >
             <Textarea rows={3} spellCheck={false} className="font-mono text-xs" value={xpub} onChange={(e) => setXpub(e.target.value)} />
@@ -315,17 +321,17 @@ export function AddWalletFlow({ onDone, onCancel }: { onDone: (w: WalletInfo) =>
               <Input
                 className="font-mono text-xs"
                 placeholder={DEFAULT_PATHS[xpubFamily ?? family]}
-                value={xpubPath}
+                value={pathValue}
                 onChange={(e) => setXpubPath(e.target.value)}
               />
             </Field>
             <Field label="Master fingerprint (optional)">
-              <Input className="font-mono text-xs" placeholder="e.g. 73c5da0a" value={fingerprint} onChange={(e) => setFingerprint(e.target.value)} />
+              <Input className="font-mono text-xs" placeholder="e.g. 73c5da0a" value={fpValue} onChange={(e) => setFingerprint(e.target.value)} />
             </Field>
           </div>
           <Button
             disabled={busy || !name.trim() || !xpub.trim() || !!xpubError}
-            onClick={() => submit({ action: "watch", name, xpub: xpub.trim(), path: xpubPath.trim(), fingerprint: fingerprint.trim() })}
+            onClick={() => submit({ action: "watch", name, xpub: xpub.trim(), path: pathValue.trim(), fingerprint: fpValue.trim() })}
           >
             {busy && <Loader2Icon className="animate-spin" />} Add watch-only wallet
           </Button>
@@ -356,5 +362,41 @@ export function AddWalletDialog({ open, onOpenChange }: { open: boolean; onOpenC
         )}
       </DialogContent>
     </Dialog>
+  )
+}
+
+/** Watch-only wallet without a master fingerprint: add it in place (8 hex, or a descriptor / [fp/path]xpub to read it from). */
+export function SetFingerprint({ walletId, className }: { walletId: string; className?: string }) {
+  const [value, setValue] = useState("")
+  const [busy, setBusy] = useState(false)
+  let fp = value.trim()
+  try {
+    fp = parseAccountKey(fp).fingerprint ?? fp
+  } catch {} // not a key: take it as typed
+  const save = async () => {
+    setBusy(true)
+    try {
+      await api("/api/wallets", { action: "fingerprint", id: walletId, fingerprint: fp })
+      toast.success("Master fingerprint saved")
+    } catch (e) {
+      toast.error("Couldn't save the fingerprint", { description: (e as Error).message })
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className={cn("flex gap-2", className)}>
+      <Input
+        className="h-8 font-mono text-xs"
+        placeholder="73c5da0a"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && /^[0-9a-f]{8}$/i.test(fp) && save()}
+        aria-label="Master fingerprint"
+      />
+      <Button size="sm" disabled={busy || !/^[0-9a-f]{8}$/i.test(fp)} onClick={save}>
+        {busy && <Loader2Icon className="animate-spin" />} Save
+      </Button>
+    </div>
   )
 }

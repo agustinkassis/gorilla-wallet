@@ -14,7 +14,7 @@ import { signPsbt } from "@/lib/server/signer"
 import { broadcastHex, validateBroadcast } from "@/lib/server/broadcast"
 import { deriveAddress, type WalletInfo, type Snapshot } from "@/lib/wallet"
 import { CHAINS, familyOf, syncedChains, type Chain } from "@/lib/chains"
-import { buildPsbt, feeAt, planTx, type Coin } from "@/lib/tx"
+import { INPUT_VSIZE, buildPsbt, feeAt, planTx, type Coin } from "@/lib/tx"
 import { forwardCommand } from "@/lib/cli/forward"
 
 export const HELP = `gorila - Bitcoin (BTC), Blake2b (XBT) and local regtest, amounts in satoshis
@@ -167,7 +167,10 @@ export async function runCli(argv: readonly string[]) {
     for (let i = 0; i < selected.length; i++) {
       const candidate = selected[i]
       if (candidate.accounts[family]) continue
-      if (candidate.kind !== "seed") throw new CliError(`Wallet has no ${family} account`)
+      if (candidate.kind !== "seed") {
+        if (command === "balance" && args.flags.has("all-wallets")) continue // e.g. a testnet-only watch wallet
+        throw new CliError(`Wallet has no ${family} account`)
+      }
       const password = await secret(args.value("password-file"), "Wallet password")
       passwords.set(candidate.id, password)
       selected[i] = await unlockAccounts(candidate.id, password)
@@ -189,7 +192,7 @@ export async function runCli(argv: readonly string[]) {
     if (!wallet) throw new CliError("No wallet selected")
     const address = args.positionals[2]
     if (!await db.address.findFirst({ where: { walletId: wallet.id, address, family } })) throw new CliError("Address does not belong to this wallet; run addresses to discover it")
-    await setLabel(wallet.id, "all", "addr", address, args.positionals[3], null)
+    await setLabel(wallet.id, chainArg(args, "btc"), "addr", address, args.positionals[3], null)
     return { walletId: wallet.id, address, label: args.positionals[3] }
   }
   if (command === "tx-status" && !/^[0-9a-f]{64}$/i.test(args.positionals[1])) throw new CliError("TXID must be 64 hex characters")
@@ -216,7 +219,7 @@ export async function runCli(argv: readonly string[]) {
       const [addresses, states, labels] = await Promise.all([
         db.address.findMany({ where: { walletId: wallet.id, family }, orderBy: [{ change: "asc" }, { index: "asc" }] }),
         db.addressState.findMany({ where: { walletId: wallet.id, chain: { in: syncedChains(chains[0]) } } }),
-        db.label.findMany({ where: { walletId: wallet.id, type: "addr", chain: "all" } }),
+        db.label.findMany({ where: { walletId: wallet.id, type: "addr", chain: chainArg(args, "btc") } }),
       ])
       return { walletId: wallet.id, addresses: addresses.map((a) => ({ address: a.address, index: a.index, change: a.change, label: labels.find((l) => l.ref === a.address)?.label ?? null, chains: syncedChains(chains[0]).map((chain) => {
         const state = states.find((s) => s.address === a.address && s.chain === chain)
@@ -239,11 +242,12 @@ export async function runCli(argv: readonly string[]) {
     if (client.fees && rate < client.fees.minimumFee) throw new CliError(`fee-rate is below the network minimum (${client.fees.minimumFee} sat/vB)`)
     const account = wallet.accounts[family]
     if (!account) throw new CliError("Wallet has no account on the selected network")
+    // Same pool as the web send page: not frozen, confirmed (or our own unconfirmed change), worth more than it costs to spend.
     const candidates: Coin[] = snapshot.utxos.filter((u) => !u.frozen).map((u) => {
       const address = snapshot.addresses.find((a) => a.address === u.address)
       if (!address) throw new CliError("UTXO address was not discovered")
       return { ...u, change: address.change, index: address.index }
-    })
+    }).filter((c) => (c.height > 0 || c.change === 1) && c.value > rate * INPUT_VSIZE)
     const usedChange = await db.addressState.findMany({ where: { walletId: wallet.id, chain: { in: syncedChains(chains[0]) }, used: true }, select: { address: true } })
     const used = new Set(usedChange.map((a) => a.address))
     let changeIndex = 0

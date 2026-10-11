@@ -14,7 +14,7 @@ export { SignError } from "@/lib/server/sign-core"
 export async function signPsbt(walletId: string, chain: Chain, psbt: Uint8Array, password?: unknown, sessionClient?: ChainClient) {
   if (sessionClient && sessionClient.chain !== chain) throw new Error("Signing client is on another chain")
   const [acct, client] = await Promise.all([signingAccount(walletId, familyOf(chain), password), sessionClient ?? chainFor(chain)])
-  const frozen = await db.label.findMany({ where: { walletId, chain: { in: [chain, "all"] }, type: "output", spendable: false }, select: { ref: true } })
+  const frozen = await db.label.findMany({ where: { walletId, chain, type: "output", spendable: false }, select: { ref: true } })
   return signWith(chain, psbt, {
     ...acct,
     prevOut: async (txid, vout) => (await client.getTx(txid)).getOutput(vout),

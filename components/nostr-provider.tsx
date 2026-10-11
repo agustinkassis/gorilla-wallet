@@ -2,23 +2,14 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { SimplePool, type Event, type EventTemplate } from "nostr-tools"
-import { finalizeEvent, getPublicKey } from "nostr-tools/pure"
-import { hexToBytes } from "nostr-tools/utils"
 import { toast } from "sonner"
+import { loginRequired } from "@/lib/api"
 import { requestNotifications } from "@/lib/notify"
 
 declare global {
   interface Window {
     nostr?: { getPublicKey(): Promise<string>; signEvent(e: EventTemplate): Promise<Event> }
-    /** device key injected by the desktop app (src-tauri), for its own origin only */
-    __NOSTR_SECRET__?: string
   }
-}
-
-// Desktop app: webviews have no NIP-07 extensions, so its device key becomes a built-in signer.
-if (typeof window !== "undefined" && window.__NOSTR_SECRET__ && !window.nostr) {
-  const sk = hexToBytes(window.__NOSTR_SECRET__)
-  window.nostr = { getPublicKey: async () => getPublicKey(sk), signEvent: async (e) => finalizeEvent(e, sk) }
 }
 
 export type Profile = { name?: string; display_name?: string; picture?: string }
@@ -66,6 +57,8 @@ export async function waitForNostr(timeoutMs = 3000) {
 type NostrContext = {
   /** undefined while hydrating, null when logged out */
   pubkey: string | null | undefined
+  /** the app asks for a login (ALLOWED_PUBKEYS is set); undefined until the server answers */
+  required: boolean | undefined
   profile: Profile | null
   login: () => Promise<void>
   logout: () => void
@@ -75,6 +68,8 @@ const Ctx = createContext<NostrContext | null>(null)
 
 export function NostrProvider({ children }: { children: React.ReactNode }) {
   const pubkey = useSyncExternalStore(subscribe, readPubkey, () => undefined)
+  const [required, setRequired] = useState<boolean>()
+  useEffect(() => void loginRequired().then(setRequired, () => {}), [])
   const [fetched, setFetched] = useState<{ pubkey: string; data: Profile } | null>(null)
   const cached = useMemo(() => (pubkey ? readProfile(pubkey) : null), [pubkey])
 
@@ -108,13 +103,8 @@ export function NostrProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(() => writePubkey(null), [])
 
-  // Desktop app: sign in with the device key right away.
-  useEffect(() => {
-    if (window.__NOSTR_SECRET__ && !readPubkey()) void login()
-  }, [login])
-
   return (
-    <Ctx.Provider value={{ pubkey, profile, login, logout }}>
+    <Ctx.Provider value={{ pubkey, required, profile, login, logout }}>
       {children}
     </Ctx.Provider>
   )

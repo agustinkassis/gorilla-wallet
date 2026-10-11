@@ -39,7 +39,7 @@ export function copy(text: string, label = "Copied") {
 
 export function SiteHeader() {
   const pathname = usePathname()
-  const { pubkey, profile, login, logout } = useNostr()
+  const { pubkey, required, profile, login, logout } = useNostr()
   const { snapshots, chain, watchOnly } = useWallet()
   const incoming = pendingIncoming({ [chain]: snapshots[chain] }).length > 0
   const title = NAV.find((n) => n.href === pathname)?.title ?? "Gorilla Wallet"
@@ -56,10 +56,10 @@ export function SiteHeader() {
       {watchOnly && <WatchOnlyBadge className="hidden sm:inline-flex" />}
 
       <div className="ml-auto flex items-center gap-1">
-        {pubkey && <NetworkSwitcher />}
+        {(pubkey || required === false) && <NetworkSwitcher />}
         <UnitSwitch />
         <ThemeToggle />
-        {pubkey === undefined ? (
+        {required === false ? null : pubkey === undefined || required === undefined ? (
           <Skeleton className="size-8 rounded-full" />
         ) : pubkey ? (
           <DropdownMenu>
@@ -103,7 +103,7 @@ export function SiteHeader() {
 
 /** The selected network, one at a time (a fork's replay pair syncs along in the background). */
 function NetworkSwitcher() {
-  const { chain } = useWallet()
+  const { chain, settings } = useWallet()
   const change = async (next: string) => {
     if (!isChain(next) || next === chain) return
     try {
@@ -124,7 +124,7 @@ function NetworkSwitcher() {
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel className="text-xs text-muted-foreground">Network</DropdownMenuLabel>
         <DropdownMenuRadioGroup value={chain} onValueChange={change}>
-          {WEB_CHAIN_IDS.map((c) => (
+          {WEB_CHAIN_IDS.filter((c) => c === chain || !settings.hidden.includes(c)).map((c) => (
             <DropdownMenuRadioItem key={c} value={c} className="gap-2">
               <span className={cn("size-2 rounded-full", CHAINS[c].bg)} />
               <span className="flex-1">{CHAINS[c].label}</span>

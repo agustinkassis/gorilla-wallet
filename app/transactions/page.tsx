@@ -22,7 +22,7 @@ const dateFmt = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeSt
 
 export default function Transactions() {
   const unit = useUnit()
-  const { snapshots, chains, pair, watchOnly } = useWallet()
+  const { snapshots, chains, pair } = useWallet()
   // replay needs the chain's pair synced alongside (Bitcoin ↔ Blake)
   const canReplay = !!pair
   const [replay, setReplay] = useState<{ chain: Chain; txid: string } | null>(null)
@@ -132,14 +132,14 @@ export default function Transactions() {
                           <Repeat2Icon /> <span className="hidden xl:inline">Replay</span>
                         </Button>
                       )}
-                      {pending && tx.amount < 0 && !watchOnly && (
+                      {pending && tx.amount < 0 && (
                         <Button asChild size="sm" variant="outline" title="Replace by fee">
                           <Link href={`/send?chain=${tx.chain}&bump=${tx.txid}`}>
                             <ZapIcon /> <span className="hidden sm:inline">Bump</span>
                           </Link>
                         </Button>
                       )}
-                      {pending && tx.amount > 0 && tx.ownCoin && !watchOnly && (
+                      {pending && tx.amount > 0 && tx.ownCoin && (
                         <Button asChild size="sm" variant="outline" title="Child pays for parent">
                           <Link href={`/send?chain=${tx.chain}&cpfp=${tx.txid}:${tx.ownCoin.vout}`}>
                             <RocketIcon /> <span className="hidden sm:inline">CPFP</span>

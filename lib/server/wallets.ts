@@ -8,7 +8,7 @@ import { config } from "@/lib/server/config"
 import { accountDescriptors } from "@/lib/descriptors"
 import { db } from "@/lib/server/db"
 import { isLocked, seal, unseal } from "@/lib/server/secret"
-import { DERIVATION_PATH, normalizeXpub, type Account, type WalletInfo, type WalletKind } from "@/lib/wallet"
+import { DERIVATION_PATH, parseAccountKey, type Account, type WalletInfo, type WalletKind } from "@/lib/wallet"
 
 export const ENV_WALLET_ID = "env"
 
@@ -174,25 +174,41 @@ export async function unlockAccounts(id: unknown, password: unknown) {
 /** Watch-only wallet from an account xpub/zpub (mainnet) or tpub/vpub (testnets). Fingerprint optional (external signers). */
 export async function importWatchWallet(o: { name: unknown; xpub: unknown; path?: unknown; fingerprint?: unknown; family?: unknown }) {
   const name = checkName(o.name)
-  let key: ReturnType<typeof normalizeXpub>
+  let key: ReturnType<typeof parseAccountKey>
   try {
-    key = normalizeXpub(String(o.xpub ?? ""))
+    key = parseAccountKey(String(o.xpub ?? ""))
   } catch (e) {
     throw new WalletError((e as Error).message)
   }
   const family = o.family === undefined ? key.family : checkFamily(o.family)
   if (family !== key.family && !(family === "regtest" && key.family === "test")) throw new WalletError("Extended public key does not match the network family")
-  const fp = typeof o.fingerprint === "string" && o.fingerprint.trim() ? o.fingerprint.trim() : ""
-  if (fp && !/^[0-9a-fA-F]{8}$/.test(fp)) throw new WalletError("Master fingerprint is 8 hex characters")
+  // typed fields win over the key's origin; without either the wallet still works, the fingerprint can be added later
+  const text = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined)
+  const fp = checkFingerprint(text(o.fingerprint) ?? key.fingerprint)
   const id = randomUUID()
   await db.$transaction([
     db.wallet.create({ data: { id, name, kind: "watch" } }),
     db.walletAccount.create({
-      data: { walletId: id, family, xpub: key.xpub, path: checkPath(o.path, family), fingerprint: fp ? parseInt(fp, 16) : 0 },
+      data: { walletId: id, family, xpub: key.xpub, path: checkPath(text(o.path) ?? key.path, family), fingerprint: fp },
     }),
   ])
   changed()
   return getWallet(id)
+}
+
+function checkFingerprint(fp: string | undefined) {
+  if (fp === undefined) return 0
+  if (!/^[0-9a-fA-F]{8}$/.test(fp)) throw new WalletError("Master fingerprint is 8 hex characters")
+  return parseInt(fp, 16)
+}
+
+/** Watch-only wallets: set the master fingerprint afterwards (PSBTs need it for hardware wallets to sign). */
+export async function setFingerprint(id: unknown, fingerprint: unknown) {
+  const w = await getWallet(id)
+  if (w.kind !== "watch") throw new WalletError("Only watch-only wallets take a fingerprint: the others know theirs")
+  const fp = checkFingerprint(typeof fingerprint === "string" ? fingerprint.trim() : "")
+  await db.walletAccount.updateMany({ where: { walletId: w.id }, data: { fingerprint: fp } })
+  changed()
 }
 
 export async function renameWallet(id: unknown, name: unknown) {

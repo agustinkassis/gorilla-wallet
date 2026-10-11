@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { ArrowUpRightIcon, CopyIcon } from "lucide-react"
+import { ArrowDownLeftIcon, ArrowUpRightIcon, CopyIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
@@ -16,7 +16,7 @@ import { CHAINS, formatAmount, hasData, sumBalances, type Chain } from "@/lib/wa
 import { cn } from "@/lib/utils"
 
 function BalanceCard({ chain }: { chain: Chain }) {
-  const { snapshots, live, flash, watchOnly } = useWallet()
+  const { snapshots, live, flash } = useWallet()
   const unit = useUnit()
   const s = snapshots[chain]
   const received = flash?.chain === chain ? flash : undefined
@@ -60,18 +60,23 @@ function BalanceCard({ chain }: { chain: Chain }) {
           )}
         </CardTitle>
       </CardHeader>
-      <CardContent>
-        {loaded && !watchOnly ? (
+      <CardContent className="flex gap-2">
+        {loaded ? (
           <Button asChild variant="outline" size="sm" className="relative z-20">
             <Link href={`/send?chain=${chain}`}>
               <ArrowUpRightIcon /> Send {meta.unit}
             </Link>
           </Button>
         ) : (
-          <Button variant="outline" size="sm" disabled title={watchOnly ? "Watch-only wallet: no keys to send" : undefined}>
+          <Button variant="outline" size="sm" disabled>
             <ArrowUpRightIcon /> Send {meta.unit}
           </Button>
         )}
+        <Button asChild variant="outline" size="sm" className="relative z-20">
+          <Link href="/receive">
+            <ArrowDownLeftIcon /> Receive
+          </Link>
+        </Button>
       </CardContent>
       <CardFooter className="flex justify-between text-sm text-muted-foreground">
         <span>
@@ -94,8 +99,8 @@ function Amount({ sats, loading }: { sats?: number; loading: boolean }) {
 }
 
 export default function Dashboard() {
-  const { addresses, path, snapshots, chains } = useWallet()
-  const labelOf = (addr: string) => (snapshots.btc ?? snapshots.xbt)?.addresses.find((a) => a.address === addr)?.label
+  const { addresses, path, snapshots, chains, chain } = useWallet()
+  const infoOf = (addr: string) => snapshots[chain]?.addresses.find((a) => a.address === addr)
   const total = (chain: Chain, addr: string) => {
     const b = snapshots[chain]?.addresses.find((a) => a.address === addr)
     return b && b.confirmed + b.unconfirmed
@@ -150,8 +155,13 @@ export default function Dashboard() {
                           <Button variant="ghost" size="icon-xs" aria-label="Copy address" onClick={() => copy(addr, "Address copied")}>
                             <CopyIcon />
                           </Button>
+                          {hasData(snapshots[chain]) && infoOf(addr)?.used === false && (
+                            <Badge variant="outline" className="border-emerald-500/40 text-emerald-600 dark:text-emerald-400" title={`Never used on ${CHAINS[chain].label}`}>
+                              Virgin
+                            </Badge>
+                          )}
                         </div>
-                        <LabelEditor chain="all" type="addr" target={addr} value={labelOf(addr)} />
+                        <LabelEditor chain={chain} type="addr" target={addr} value={infoOf(addr)?.label} />
                       </TableCell>
                       {chains.map((c, j) => (
                         <TableCell key={c} className={cn("text-right", j === chains.length - 1 && "pr-4 sm:pr-2")}>

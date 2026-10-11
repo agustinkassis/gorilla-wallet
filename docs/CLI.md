@@ -5,7 +5,7 @@ Comparte wallets, seeds, labels, fuentes y SQLite con la web. No usa BDK ni RPC.
 
 ## Instalación
 
-Desde `gorila-wallet`, en la rama `add-cli-tool`:
+Desde el checkout de `gorila-wallet`:
 
 ```sh
 nvm use
@@ -96,9 +96,11 @@ saltadas y extiende el gap más allá del cursor. Los avances simultáneos de pr
 se serializan mediante una transacción de SQLite.
 
 `addresses` muestra recepción y cambio, índice, label, uso y conteo de txids
-distintos por cadena. Los labels de dirección se guardan con ámbito compartido
-`all`, visible en BTC y XBT. `address label` exige una dirección ya derivada para
-esa wallet; se puede ejecutar `addresses` para descubrirla.
+distintos por cadena. Los labels de dirección son por cadena, como en la web: la
+misma dirección puede tener un label en BTC y otro en XBT. `receive --label`,
+`addresses` y `address label` usan `--chain` (BTC por defecto). `address label`
+exige una dirección ya derivada para esa wallet; se puede ejecutar `addresses`
+para descubrirla.
 
 ## Balances, historial y estado
 
@@ -158,7 +160,9 @@ Sin tarifa explícita se usa la estimación de una hora. Si las fuentes no ofrec
 estimaciones, se exige `--fee-rate`. La tarifa debe estar entre 1 y 1000 sat/vB y
 no ser inferior al mínimo informado por la red.
 
-La selección de monedas excluye outputs congelados. Se construye una PSBT con
+La selección de monedas, como en la web, excluye outputs congelados, monedas
+no confirmadas recibidas de terceros y monedas que cuestan más de lo que valen.
+Se construye una PSBT con
 el núcleo compartido y se muestra en stderr la revisión completa: inputs,
 destino, cambio, comisión, tamaño y script OP_RETURN. Solo después se solicita
 confirmación y contraseña para firmar y publicar. Escribir algo distinto de
@@ -269,7 +273,7 @@ regtest, mina bloques y ejecuta el launcher real del CLI. Verifica las
 transacciones contra Bitcoin Core y elimina los recursos de su propia ejecución.
 Las pruebas BTC/XBT simuladas siguen disponibles mediante `pnpm check:cli`.
 
-Los resultados y transcripciones se guardan en `.omo/evidence/`; se puede cambiar
+Los resultados y transcripciones se guardan en un directorio temporal del sistema (su ruta se imprime al terminar); se puede cambiar
 la ubicación con `REGTEST_EVIDENCE_DIR`. El nodo de pruebas permite scripts
 OP_RETURN de hasta 1000 bytes para probar la protección BTC de 84 bytes.
 La prueba de reorganización reconstruye el índice local después de invalidar

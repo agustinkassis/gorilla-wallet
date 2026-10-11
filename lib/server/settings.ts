@@ -41,7 +41,8 @@ export function parseSettings(input: unknown): Partial<Settings> {
   const out: Partial<Settings> = {}
   for (const [k, v] of Object.entries(input)) {
     if ((k === "sound" || k === "notifications" || k === "replayGuard") && typeof v === "boolean") out[k] = v
-    else if (k === "chain" && isChain(v)) out.chain = v
+    else if (k === "chain" && isChain(v) && v !== "regtest") out.chain = v // regtest is CLI-only: it has no default servers
+    else if (k === "hidden" && Array.isArray(v) && v.every(isChain)) out.hidden = [...new Set(v)]
     else if (k === "sources") out.sources = parseSources(v)
     else if (k === "feePreset" && PRESETS.includes(v as FeePreset)) out.feePreset = v as FeePreset
     else if ((k === "gapReceive" || k === "gapChange") && isGap(v)) out[k] = v as number

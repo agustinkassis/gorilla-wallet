@@ -95,8 +95,8 @@ async function main() {
     const ref = `${"a".repeat(64)}:0`
     await db.utxo.create({ data: { walletId: wallet.id, chain: "btc", txid: "a".repeat(64), vout: 0, address: skipped, value: 10000n, height: 1 } })
     await db.label.createMany({ data: [
-      { walletId: wallet.id, chain: "all", type: "output", ref, spendable: false },
-      { walletId: wallet.id, chain: "btc", type: "output", ref, label: "display override", spendable: true },
+      { walletId: wallet.id, chain: "btc", type: "output", ref, label: "display override", spendable: false },
+      { walletId: wallet.id, chain: "xbt", type: "output", ref, spendable: true },
     ] })
     const sync = withFees.client("btc").syncs.get(wallet.id)
     assert.ok(sync)
@@ -105,7 +105,7 @@ async function main() {
     await withFees.close()
     active = undefined
     console.log("PASS unavailable HTTP fee source falls back to fresh Electrum estimates")
-    console.log("PASS shared freeze remains effective with overlapping chain-specific labels")
+    console.log("PASS a freeze applies to its own chain, whatever the other chain says")
 
     // Given a writer holding SQLite longer than its busy timeout, when syncing, then this session retries after release.
     await db.address.deleteMany({ where: { walletId: wallet.id } })

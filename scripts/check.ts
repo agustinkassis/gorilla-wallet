@@ -8,13 +8,15 @@ import { secp256k1 } from "@noble/curves/secp256k1.js"
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js"
 import { finalizeEvent, generateSecretKey, getPublicKey, nip98 } from "nostr-tools"
 import { familyPath } from "../lib/chains"
-import { amountInput, deriveAddresses, displayXpub, formatAmount, normalizeXpub, parseAmount, parseCoins, scriptHash, txEvents, type Snapshot, type Tx } from "../lib/wallet"
+import { amountInput, deriveAddresses, displayXpub, formatAmount, normalizeXpub, parseAccountKey, parseAmount, parseCoins, scriptHash, txEvents, type Snapshot, type Tx } from "../lib/wallet"
 import { db } from "../lib/server/db"
 import { WrongPasswordError, isLocked, seal, unseal } from "../lib/server/secret"
-import { createSeedWallet, deleteWallet, importWatchWallet, listWallets, signingAccount, unlockAccounts } from "../lib/server/wallets"
+import { createSeedWallet, deleteWallet, importWatchWallet, listWallets, setFingerprint, signingAccount, unlockAccounts } from "../lib/server/wallets"
 import { addressFor, buildPsbt, cpfpFee, feeAt, importSigned, opReturnScript, outputRuleError, planTx, rbfFee, scriptFor, type Coin } from "../lib/tx"
 import { SIGHASH_ALL_UNIFIED, unifiedSighash, type ScriptType } from "../lib/unified-sighash"
 import { requireNostr } from "../lib/server/auth"
+import { validRef } from "../lib/server/labels"
+import { parseSettings } from "../lib/server/settings"
 import { headerTime } from "../lib/server/watcher"
 import { signWith, type SignContext } from "../lib/server/sign-core"
 
@@ -258,6 +260,18 @@ const throws = async (fn: () => unknown, re: RegExp) => {
   await db.walletAccount.delete({ where: { walletId_family: { walletId: open.id, family: "test" } } })
   assert.equal((await listWallets()).find((w) => w.id === open.id)?.accounts.test?.xpub, testXpub)
   const watch = await importWatchWallet({ name: "check watch", xpub: "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs" })
+  // descriptors / key origins fill the fingerprint and path (an account xpub alone can't carry them)
+  const zpub = "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs"
+  assert.deepEqual(parseAccountKey(`wpkh([73C5DA0A/84h/0h/0h]${zpub}/0/*)#abcdefgh`), { xpub, family: "main", fingerprint: "73c5da0a", path: "m/84'/0'/0'" })
+  assert.deepEqual(parseAccountKey(`[73c5da0a/84'/0'/0']${zpub}`), { xpub, family: "main", fingerprint: "73c5da0a", path: "m/84'/0'/0'" })
+  assert.deepEqual(parseAccountKey(` ${zpub} `), { xpub, family: "main" })
+  assert.throws(() => parseAccountKey(`sh(wpkh([73c5da0a/49h/0h/0h]${zpub}/0/*))`), /native SegWit/)
+  const described = await importWatchWallet({ name: "check descriptor", xpub: `wpkh([73c5da0a/84h/0h/7h]${zpub}/0/*)` })
+  assert.deepEqual(described.accounts.main, { xpub, path: "m/84'/0'/7'", fingerprint: 0x73c5da0a })
+  await setFingerprint(watch.id, "0badf00d")
+  assert.equal((await listWallets()).find((w) => w.id === watch.id)?.accounts.main?.fingerprint, 0x0badf00d)
+  await throws(() => setFingerprint(watch.id, "nope"), /8 hex/)
+  await deleteWallet(described.id)
   assert.ok(watch.watchOnly && watch.accounts.main?.xpub === xpub && !watch.accounts.test)
   await throws(() => signingAccount(watch.id, "main"), /watch-only/)
   const watchTest = await importWatchWallet({ name: "check watch test", xpub: displayXpub(testXpub, "test") })
@@ -268,10 +282,32 @@ const throws = async (fn: () => unknown, re: RegExp) => {
   await deleteWallet(open.id)
   await deleteWallet(watch.id)
 
-  // --- NIP-98: allowlist + payload binding ------------------------------------------------------
-  await db.account.deleteMany()
-  await db.setting.deleteMany({ where: { key: "owner" } })
+  // --- settings: hidden networks are known chains, deduplicated ----------------------------------
+  assert.deepEqual(parseSettings({ hidden: ["xbt", "signet", "xbt"] }), { hidden: ["xbt", "signet"] })
+  assert.throws(() => parseSettings({ hidden: ["doge"] }), /Invalid setting/)
+  assert.throws(() => parseSettings({ hidden: "xbt" }), /Invalid setting/)
+
+  // --- labels: one chain each, address refs checked against that chain's network ---------------
+  assert.ok(validRef("addr", "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", "btc"))
+  assert.ok(validRef("addr", "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", "xbt"))
+  assert.ok(validRef("addr", "tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx", "tbtc4"))
+  assert.ok(!validRef("addr", "tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx", "btc"), "testnet address on mainnet")
+  assert.ok(!validRef("addr", " bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", "btc"), "untrimmed ref")
+  assert.ok(validRef("output", `${"ab".repeat(32)}:1`, "btc") && !validRef("utxo", "x", "btc"))
+
+  // --- no ALLOWED_PUBKEYS: open, but only to localhost and this app's own pages -------------------
   const url = "http://localhost:3000/api/stream"
+  process.env.ALLOWED_PUBKEYS = ""
+  const local = (headers: Record<string, string>) => requireNostr(new Request(url, { method: "POST", headers }))
+  assert.equal(await local({ host: "localhost:3000" }), null)
+  assert.equal(await local({ host: "127.0.0.1:3000", origin: "http://127.0.0.1:3000" }), null)
+  assert.equal((await local({ host: "evil.example:3000" }))?.status, 403, "DNS rebinding refused")
+  assert.equal((await local({ host: "192.168.1.4:3000" }))?.status, 403, "LAN host refused")
+  assert.equal((await local({ host: "localhost:3000", origin: "http://evil.example" }))?.status, 403, "other site refused")
+  assert.equal((await local({ host: "localhost:3000", origin: "http://localhost:5173" }))?.status, 403, "other local app refused")
+  assert.equal((await local({ host: "localhost:3000", origin: "null" }))?.status, 403, "opaque origin refused")
+
+  // --- NIP-98: allowlist + payload binding ------------------------------------------------------
   const allowed = generateSecretKey()
   process.env.ALLOWED_PUBKEYS = getPublicKey(allowed)
   const tokenFor = (sk: Uint8Array, u = url, method = "GET", body?: object) => nip98.getToken(u, method, (e) => finalizeEvent(e, sk), true, body)
@@ -282,16 +318,10 @@ const throws = async (fn: () => unknown, re: RegExp) => {
   assert.equal((await requireNostr(req(await tokenFor(allowed, "http://evil.example/api/stream"))))?.status, 401)
   const body = { chain: "btc", hex: "00" }
   const posted = await tokenFor(allowed, url, "POST", body)
-  assert.equal(await requireNostr(req(posted, "POST"), body), null)
   assert.equal((await requireNostr(req(posted, "POST"), { ...body, hex: "01" }))?.status, 401, "tampered body rejected")
+  assert.equal(await requireNostr(req(posted, "POST"), body), null)
+  assert.equal((await requireNostr(req(posted, "POST"), body))?.status, 401, "replayed write rejected")
   assert.equal((await requireNostr(req(await tokenFor(allowed, url, "POST"), "POST"), body))?.status, 401, "POST without payload tag rejected")
-
-  // no allowlist anywhere: the first login claims the app, later strangers are refused
-  process.env.ALLOWED_PUBKEYS = ""
-  const first = generateSecretKey()
-  assert.equal(await requireNostr(req(await tokenFor(first))), null, "first login claims")
-  assert.equal((await requireNostr(req(await tokenFor(generateSecretKey()))))?.status, 403, "second key refused")
-  assert.equal(await requireNostr(req(await tokenFor(first))), null, "owner still allowed")
 
   console.log("all checks passed")
 })().catch((e) => {

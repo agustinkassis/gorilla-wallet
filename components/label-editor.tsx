@@ -16,7 +16,7 @@ export function LabelEditor({
   value,
   className,
 }: {
-  chain: Chain | "all"
+  chain: Chain
   type: "tx" | "addr" | "output"
   target: string
   value?: string

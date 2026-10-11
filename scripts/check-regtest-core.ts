@@ -5,6 +5,8 @@ import { join } from "node:path"
 import { CHAINS, WEB_CHAIN_IDS, familyOf, minDataScript, syncedChains } from "../lib/chains"
 import { runCli } from "../lib/cli/run"
 import { config } from "../lib/server/config"
+import { parseSettings } from "../lib/server/settings"
+import { openSyncSession } from "../lib/server/watcher"
 import { db } from "../lib/server/db"
 import { receiveAddress } from "../lib/server/receive"
 import { createSeedWallet, deleteWallet, exportDescriptors, getWallet, importWatchWallet } from "../lib/server/wallets"
@@ -23,11 +25,13 @@ async function main() {
     assert.equal(new Set<string>(WEB_CHAIN_IDS).has("regtest"), false)
     assert.equal(minDataScript("regtest"), 84)
     assert.deepEqual(config.sources("regtest", DEFAULT_SETTINGS), { electrum: [], mempool: [] })
+    assert.throws(() => parseSettings({ chain: "regtest" }), /Invalid setting/)
     console.log("PASS regtest has isolated family, no public defaults, hidden web choice, and BTC data minimum")
 
     // Given one seed, when receiving on both families, then identical scripts coexist under distinct addresses/cursors.
     const wallet = await createSeedWallet({ name: "regtest core", mnemonic: "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about", password: "correct horse" })
     ids.push(wallet.id)
+    await assert.rejects(openSyncSession([wallet], ["regtest"], 1000), /No Electrum server configured for Regtest/)
     const regtest = await receiveAddress(wallet.id, "regtest", { label: "regtest only" })
     const test = await receiveAddress(wallet.id, "signet")
     assert.match(regtest.address, /^bcrt1q/)

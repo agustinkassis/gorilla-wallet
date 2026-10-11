@@ -33,13 +33,15 @@ async function main() {
 
     const first = await receiveAddress(wallet.id, "btc", { label: "shared label" })
     assert.equal(first.index, 0)
-    assert.deepEqual(await receiveAddress(wallet.id, "xbt"), first)
+    const onXbt = await receiveAddress(wallet.id, "xbt") // same address on XBT, but labels are per chain
+    assert.equal(onXbt.label, undefined)
+    assert.deepEqual({ ...onXbt, label: first.label }, first)
     await db.$disconnect()
     assert.deepEqual(await receiveAddress(wallet.id, "btc"), first)
     const next = await receiveAddress(wallet.id, "xbt", { next: true })
     assert.equal(next.index, 1)
     assert.equal(await db.addressState.count({ where: { walletId: wallet.id, used: true } }), 0)
-    assert.equal(await db.label.count({ where: { walletId: wallet.id, chain: "all", ref: first.address, label: "shared label" } }), 1)
+    assert.equal(await db.label.count({ where: { walletId: wallet.id, chain: "btc", ref: first.address, label: "shared label" } }), 1)
     await db.addressState.create({ data: { walletId: wallet.id, chain: "xbt", address: next.address, used: true } })
     const afterXbt = await receiveAddress(wallet.id, "btc")
     assert.equal(afterXbt.index, 2)

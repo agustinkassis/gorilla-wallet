@@ -62,6 +62,8 @@ export type ChainSources = { electrum?: string[]; mempool?: string[] }
 export type Settings = {
   /** the selected network (navbar); its replay pair, if any, syncs along */
   chain: Chain
+  /** networks left out of the navbar switcher (the selected one always shows) */
+  hidden: Chain[]
   sources: Partial<Record<Chain, ChainSources>>
   sound: boolean
   notifications: boolean
@@ -73,6 +75,7 @@ export type Settings = {
 }
 export const DEFAULT_SETTINGS: Settings = {
   chain: "btc",
+  hidden: [],
   sources: {},
   sound: true,
   notifications: true,
@@ -110,6 +113,22 @@ export function normalizeXpub(input: string): { xpub: string; family: Family } {
   const xpub = base58check.encode(concatBytes(XPUB, raw.slice(4)))
   HDKey.fromExtendedKey(xpub) // validates the key itself
   return { xpub, family }
+}
+
+/**
+ * An account key as wallets export it: a bare xpub/zpub/tpub/vpub, a key with origin `[73c5da0a/84h/0h/0h]xpub…`, or an
+ * output descriptor `wpkh([73c5da0a/84'/0'/0']xpub…/0/*)#checksum` (Sparrow, Coldcard, Jade, Bitcoin Core). Only the
+ * origin carries the master fingerprint and path: an account xpub alone can't give them.
+ */
+export function parseAccountKey(input: string): { xpub: string; family: Family; fingerprint?: string; path?: string } {
+  const s = input.trim()
+  if (/^(sh|pkh|tr|wsh|multi|sortedmulti)\(/i.test(s)) throw new Error("Only native SegWit (wpkh) accounts are supported")
+  const origin = s.match(/\[([0-9a-fA-F]{8})((?:\/\d+['hH]?)*)\]/)
+  const key = s.match(/[tuvxyzTUVXYZ]pub[1-9A-HJ-NP-Za-km-z]{100,112}/)?.[0] ?? s
+  return {
+    ...normalizeXpub(key),
+    ...(origin && { fingerprint: origin[1].toLowerCase(), path: origin[2] ? `m${origin[2].replace(/[hH]/g, "'")}` : undefined }),
+  }
 }
 
 /** An account xpub as other wallets show it on its family: xpub on mainnet, tpub on testnets. */

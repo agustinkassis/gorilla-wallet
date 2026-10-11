@@ -1,7 +1,9 @@
 name: Desktop
 
 # Builds the Tauri app natively on each OS/arch (the bundled Node and better-sqlite3 are native, so no cross-compiling).
-# Run it from the Actions tab, or push a v* tag to also get a draft release with every installer.
+# Run it from the Actions tab, or push a v* tag to also get a draft release with every installer (README → Releasing).
+# A tag is strict: the tag must match package.json, macOS must be Developer ID signed and notarized, and the draft
+# release is only created when all six builds succeed.
 on:
   workflow_dispatch:
   push:
@@ -28,6 +30,16 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Tag matches package.json
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          version="v$(node -p 'require("./package.json").version')"
+          if [ "$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME but package.json says $version"
+            exit 1
+          fi
+
       - name: Linux build dependencies
         if: runner.os == 'Linux'
         run: |
@@ -45,7 +57,64 @@ jobs:
           workspaces: src-tauri
 
       - run: pnpm install --frozen-lockfile
+
+      # macOS: Developer ID signing + notarization (README → Signed macOS builds). Missing secrets only warn outside tags.
+      # The certificate goes into a temporary keychain first: scripts/desktop.mjs signs native modules before Tauri runs.
+      - name: Apple Developer ID
+        if: runner.os == 'macOS'
+        env:
+          CERT: ${{ secrets.APPLE_CERTIFICATE }}
+          CERT_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          skip() {
+            if [ "$GITHUB_REF_TYPE" = tag ]; then echo "::error::$1"; exit 1; fi
+            echo "::warning::$1"; exit 0
+          }
+          [ -n "$CERT" ] || skip "No Apple Developer ID secrets: ad-hoc signed, Gatekeeper blocks the first launch"
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+          printf '%s' "$CERT" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$CERT_PASSWORD" -f pkcs12 -A
+          rm "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"')"
+          if [ -z "$IDENTITY" ]; then
+            echo "::error::APPLE_CERTIFICATE has no 'Developer ID Application' identity"
+            exit 1
+          fi
+          echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          [ -n "$API_KEY_ID" ] || skip "No App Store Connect API key: signed but not notarized, Gatekeeper still blocks it"
+          if ! [[ "$API_ISSUER" =~ ^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$ ]]; then
+            echo "::error::APPLE_API_ISSUER is not a UUID: copy the Issuer ID from App Store Connect → Integrations → Team Keys"
+            exit 1
+          fi
+          printf '%s\n' "$API_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+          {
+            echo "APPLE_API_KEY=$API_KEY_ID"
+            echo "APPLE_API_ISSUER=$API_ISSUER"
+            echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/AuthKey.p8"
+          } >> "$GITHUB_ENV"
+
       - run: pnpm tauri build
+
+      - name: Check Gatekeeper accepts the app
+        if: runner.os == 'macOS' && env.APPLE_API_KEY != ''
+        run: |
+          spctl --assess --type exec -vv "src-tauri/target/release/bundle/macos/Gorilla Wallet.app"
+          xcrun stapler validate "src-tauri/target/release/bundle/macos/Gorilla Wallet.app"
+
+      - name: Remove signing material
+        if: always() && runner.os == 'macOS'
+        run: |
+          rm -f "$RUNNER_TEMP/AuthKey.p8"
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2> /dev/null || true
 
       - uses: actions/upload-artifact@v4
         with:
@@ -59,8 +128,8 @@ jobs:
             src-tauri/target/release/bundle/appimage/*.AppImage
 
   release:
-    # a tag publishes whatever built (one failing arch doesn't hold back the others)
-    if: github.ref_type == 'tag' && !cancelled()
+    # only when every OS/arch built: a release always carries the same six sets of installers
+    if: github.ref_type == 'tag'
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -70,9 +139,18 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      # artifacts keep their bundle folders (dmg/, nsis/, appimage/…); file names have spaces
+      # artifacts keep their bundle folders (dmg/, nsis/, appimage/…); file names have spaces.
+      # A re-run (or a release drafted by hand for this tag) gets its files replaced instead of failing.
       - run: |
           mapfile -d '' files < <(find dist -type f -print0)
-          gh release create "$GITHUB_REF_NAME" "${files[@]}" --draft --generate-notes --title "Gorilla Wallet $GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY"
+          if [ "${#files[@]}" -ne 10 ]; then  # 2 dmg, 2 exe, AppImage + deb + rpm per Linux arch
+            echo "::error::Expected 10 installers, got ${#files[@]}"
+            exit 1
+          fi
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$GITHUB_REF_NAME" "${files[@]}" --draft --generate-notes --title "Gorilla Wallet $GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY"
+          fi
         env:
           GH_TOKEN: ${{ github.token }}

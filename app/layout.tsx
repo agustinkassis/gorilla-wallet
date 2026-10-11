@@ -5,6 +5,7 @@ import { AppSidebar } from "@/components/app-sidebar"
 import { Gate } from "@/components/gate"
 import { NostrProvider } from "@/components/nostr-provider"
 import { SiteHeader } from "@/components/site-header"
+import { Splash, SplashHead } from "@/components/splash"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -23,7 +24,11 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} ${display.variable} h-full antialiased`} suppressHydrationWarning>
+      <head>
+        <SplashHead />
+      </head>
       <body className="min-h-full">
+        <Splash />
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
         <TooltipProvider>
           <NostrProvider>

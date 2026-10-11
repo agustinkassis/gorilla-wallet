@@ -1,0 +1,128 @@
+<!doctype html>
+<!-- Shown by the desktop app the moment it opens, while the bundled server starts (src-tauri/src/main.rs).
+     Same look as components/splash.tsx, which takes over with real asset progress once the app page loads. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gorilla Wallet</title>
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        position: relative;
+        overflow: hidden;
+        background: #cc0404;
+        cursor: default;
+        user-select: none;
+      }
+      img {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        object-position: center top;
+      }
+      @media (max-aspect-ratio: 1/1) {
+        img {
+          object-fit: contain;
+          object-position: center;
+        }
+      }
+      .foot {
+        position: absolute;
+        left: 50%;
+        bottom: max(24px, 5vh);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        transform: translateX(-50%);
+      }
+      .track {
+        position: relative;
+        width: min(320px, 60vw);
+        height: 8px;
+        border-radius: 999px;
+        background: rgba(0, 0, 0, 0.6);
+        box-shadow:
+          0 0 0 1px rgba(255, 255, 255, 0.35),
+          0 2px 16px rgba(0, 0, 0, 0.5);
+        overflow: hidden;
+      }
+      /* nothing to count yet while the server starts: a glint says it's alive, the app page fills the bar */
+      .track::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        width: 30%;
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.7), transparent);
+        animation: glint 1.2s ease-in-out infinite;
+      }
+      @keyframes glint {
+        from {
+          transform: translateX(-100%);
+        }
+        to {
+          transform: translateX(340%);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .track::after {
+          animation: none;
+        }
+      }
+      #version {
+        padding: 4px 8px;
+        border-radius: 999px;
+        background: rgba(0, 0, 0, 0.6);
+        color: #fff;
+        font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+        letter-spacing: 0.08em;
+      }
+      #version:empty {
+        visibility: hidden;
+      }
+      #error {
+        position: absolute;
+        left: 50%;
+        bottom: max(32px, 6vh);
+        width: min(420px, calc(100% - 32px));
+        box-sizing: border-box;
+        margin: 0;
+        padding: 10px 14px;
+        transform: translateX(-50%);
+        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.6);
+        color: #fff;
+        font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+        text-align: center;
+      }
+      .failed .foot {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <img src="splash.webp" alt="" />
+    <div class="foot">
+      <div class="track"></div>
+      <span id="version"></span>
+    </div>
+    <p id="error" hidden></p>
+    <script>
+      // set by main.rs before any script runs
+      if (window.__GORILLA_VERSION__) document.getElementById("version").textContent = "v" + window.__GORILLA_VERSION__
+      // called by main.rs when the server can't start
+      window.splashError = (message) => {
+        document.body.classList.add("failed")
+        const el = document.getElementById("error")
+        el.textContent = message
+        el.hidden = false
+      }
+    </script>
+  </body>
+</html>

@@ -34,7 +34,7 @@ export async function receiveAddress(id: unknown, chain: Chain, options: { reado
       create: { walletId: wallet.id, family, address, change: 0, index, scripthash: scriptHash(address, family) },
       update: {},
     })
-    const key = { walletId: wallet.id, chain: "all", type: "addr", ref: address }
+    const key = { walletId: wallet.id, chain, type: "addr", ref: address } // address labels belong to one chain
     if (options.label !== undefined) await tx.label.upsert({
       where: { walletId_chain_type_ref: key }, create: { ...key, label: options.label }, update: { label: options.label },
     })

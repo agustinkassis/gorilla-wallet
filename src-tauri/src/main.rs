@@ -9,9 +9,9 @@ use std::{
     thread::sleep,
     time::{Duration, Instant},
 };
-use tauri::{webview::NewWindowResponse, Manager, RunEvent, Url, WebviewUrl, WebviewWindowBuilder};
+use tauri::{webview::NewWindowResponse, window::Color, AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindowBuilder};
 
-/// Preferred port: a stable origin keeps the webview's localStorage (login, selected wallet, theme) across launches.
+/// Preferred port: a stable origin keeps the webview's localStorage (selected wallet, theme) across launches.
 const PORT: u16 = 47_291;
 
 struct Server(Mutex<Option<Child>>);
@@ -21,7 +21,6 @@ fn main() {
         .setup(|app| {
             let data = app.path().app_data_dir()?;
             fs::create_dir_all(&data)?;
-            let secret = device_key(&data)?;
 
             let port = TcpListener::bind(("127.0.0.1", PORT))
                 .or_else(|_| TcpListener::bind(("127.0.0.1", 0)))?
@@ -29,23 +28,28 @@ fn main() {
                 .port();
             let child = start_server(&app.path().resource_dir()?.join("server"), &data, port)?;
             app.manage(Server(Mutex::new(Some(child))));
-            wait_for_server(app, port)?;
-            // localhost, not 127.0.0.1: Next.js sees request URLs as localhost, and NIP-98 tokens sign the page's URL
+            // localhost: the same origin as earlier versions, so the webview keeps its localStorage
             let url: Url = format!("http://localhost:{port}").parse()?;
-
-            let origin = url.origin().ascii_serialization();
-            let local = origin.clone();
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
+            let local = url.origin().ascii_serialization();
+            // `tauri dev` serves the splash from its own dev server (http://127.0.0.1:1430), bundles from tauri://
+            let dev_splash = app.config().build.dev_url.as_ref().map(|u| u.origin().ascii_serialization());
+            // Opens at once on the bundled splash (splash/index.html) while the server starts, then moves to the app.
+            let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("Gorilla Wallet")
                 .inner_size(1280.0, 840.0)
                 .min_inner_size(380.0, 600.0)
-                // Built-in NIP-07 signer (components/nostr-provider.tsx), only ever exposed to our own origin.
+                .background_color(Color(204, 4, 4, 255)) // the splash red: no white flash between pages
+                // the app's boot screen (components/splash.tsx) only shows in the desktop app
                 .initialization_script(format!(
-                    "if (location.origin === {origin:?}) window.__NOSTR_SECRET__ = {secret:?}"
+                    "window.__GORILLA_NATIVE__ = true; window.__GORILLA_VERSION__ = {:?}",
+                    app.package_info().version.to_string()
                 ))
                 // External links (explorers) open in the system browser.
                 .on_navigation(move |u| {
-                    let ours = u.origin().ascii_serialization() == local;
+                    // the splash: tauri://localhost (macOS, Linux), http://tauri.localhost (Windows) or the dev server
+                    let origin = u.origin().ascii_serialization();
+                    let splash = u.scheme() == "tauri" || u.host_str() == Some("tauri.localhost") || dev_splash.as_ref() == Some(&origin);
+                    let ours = splash || origin == local;
                     if !ours {
                         open_external(u);
                     }
@@ -58,6 +62,13 @@ fn main() {
                 // Let <a download> save to the Downloads folder (ignored by default on macOS / Linux).
                 .on_download(|_, _| true)
                 .build()?;
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let _ = match wait_for_server(&handle, port) {
+                    Ok(()) => window.navigate(url),
+                    Err(e) => window.eval(format!("splashError({e:?})")),
+                };
+            });
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -69,19 +80,6 @@ fn main() {
                 }
             }
         });
-}
-
-/// The desktop app's Nostr identity: a random key kept next to the database (the first login claims the wallet).
-fn device_key(data: &Path) -> Result<String, Box<dyn std::error::Error>> {
-    let path = data.join("nostr.key");
-    if let Ok(key) = fs::read_to_string(&path) {
-        return Ok(key.trim().to_owned());
-    }
-    let mut bytes = [0u8; 32];
-    getrandom::fill(&mut bytes)?;
-    let key: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-    fs::write(&path, &key)?;
-    Ok(key)
 }
 
 /// Runs the bundled Next.js standalone server on the bundled Node (`gorilla-node`, next to our executable).
@@ -103,15 +101,15 @@ fn start_server(server: &Path, data: &Path, port: u16) -> std::io::Result<Child>
     cmd.spawn()
 }
 
-fn wait_for_server(app: &tauri::App, port: u16) -> Result<(), Box<dyn std::error::Error>> {
+fn wait_for_server(app: &AppHandle, port: u16) -> Result<(), String> {
     let started = Instant::now();
     while TcpStream::connect(("127.0.0.1", port)).is_err() {
         let state = app.state::<Server>();
         if let Some(status) = state.0.lock().unwrap().as_mut().and_then(|c| c.try_wait().ok().flatten()) {
-            return Err(format!("server exited ({status}), see server.log in the app data folder").into());
+            return Err(format!("The wallet server stopped ({status}). See server.log in the app data folder."));
         }
         if started.elapsed() > Duration::from_secs(60) {
-            return Err("server did not start within 60 s, see server.log in the app data folder".into());
+            return Err("The wallet server didn't start within 60 s. See server.log in the app data folder.".into());
         }
         sleep(Duration::from_millis(50));
     }

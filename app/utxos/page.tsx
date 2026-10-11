@@ -23,7 +23,7 @@ type Filter = Chain | "all"
 
 export default function UtxosPage() {
   const unit = useUnit()
-  const { snapshots, chains, chain: active, wallet, watchOnly } = useWallet()
+  const { snapshots, chains, chain: active, wallet } = useWallet()
   const router = useRouter()
   const [filter, setFilter] = useState<Filter>("all")
   const [selected, setSelected] = useState<{ chain: Chain; ops: Set<string> } | null>(null)
@@ -110,8 +110,6 @@ export default function UtxosPage() {
                 </Button>
                 <Button
                   size="sm"
-                  disabled={watchOnly}
-                  title={watchOnly ? "Watch-only wallet: no keys to send" : undefined}
                   onClick={() => router.push(`/send?chain=${selected.chain}&utxos=${[...selected.ops].join(",")}`)}
                 >
                   <SendIcon /> Send selected
@@ -180,7 +178,7 @@ export default function UtxosPage() {
                       <TableCell className="hidden text-right font-mono text-xs sm:table-cell">{confs || "—"}</TableCell>
                       <TableCell className="pr-4 text-right sm:pr-2">
                         <div className="flex justify-end gap-0.5 sm:gap-1">
-                          {u.height <= 0 && !u.frozen && !watchOnly && (
+                          {u.height <= 0 && !u.frozen && (
                             <Button size="icon-sm" variant="ghost" title="Accelerate (CPFP)" onClick={() => router.push(`/send?chain=${u.chain}&cpfp=${op}`)}>
                               <RocketIcon />
                             </Button>

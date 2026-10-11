@@ -1,9 +1,10 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
-import { CheckIcon, DownloadIcon, NetworkIcon, Trash2Icon, UploadIcon, UsersIcon } from "lucide-react"
+import { useEffect, useRef, useState, useSyncExternalStore } from "react"
+import { CheckIcon, DownloadIcon, EyeIcon, EyeOffIcon, NetworkIcon, Trash2Icon, UploadIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
+import { SetFingerprint } from "@/components/add-wallet"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -38,8 +39,13 @@ const PRESETS: { key: FeePreset; label: string }[] = [
   { key: "economyFee", label: "Economy" },
 ]
 
+// Notification permission only exists in the browser: null on the server and during hydration.
+const noSubscribe = () => () => {}
+const readPermission = () => (canNotify() ? Notification.permission : null)
+
 export default function SettingsPage() {
   const { settings, chains } = useWallet()
+  const permission = useSyncExternalStore(noSubscribe, readPermission, () => null)
   const save = async (patch: Partial<Settings>) => {
     try {
       await api("/api/settings", patch)
@@ -67,7 +73,7 @@ export default function SettingsPage() {
               void save({ notifications })
             }}
           />
-          {canNotify() && typeof Notification !== "undefined" && Notification.permission === "denied" && (
+          {permission === "denied" && (
             <p className="text-xs text-amber-600 dark:text-amber-400">Notifications are blocked for this site in your browser settings.</p>
           )}
         </CardContent>
@@ -125,8 +131,6 @@ export default function SettingsPage() {
       </Card>
 
       <WalletCard />
-      <AccessCard />
-
     </div>
   )
 }
@@ -146,6 +150,14 @@ function NetworksCard() {
       await api("/api/settings", { chain })
     } catch (e) {
       toast.error("Couldn't switch network", { description: (e as Error).message })
+    }
+  }
+  const toggleHidden = async (chain: Chain) => {
+    const hidden = settings.hidden.includes(chain) ? settings.hidden.filter((c) => c !== chain) : [...settings.hidden, chain]
+    try {
+      await api("/api/settings", { hidden })
+    } catch (e) {
+      toast.error("Couldn't update the navbar networks", { description: (e as Error).message })
     }
   }
   const saveSources = async (chain: Chain, next: ChainSources | null) => {
@@ -168,8 +180,8 @@ function NetworksCard() {
           <NetworkIcon className="size-4" /> Networks
         </CardTitle>
         <CardDescription>
-          One network at a time (also from the navbar). Each chain can use several Electrum servers and mempool explorers, tried in order; a fork&apos;s
-          replay pair syncs along for replay checks.
+          One network at a time (also from the navbar; hide the ones you don&apos;t use). Each chain can use several Electrum servers and mempool explorers,
+          tried in order; a fork&apos;s replay pair syncs along for replay checks.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
@@ -183,10 +195,11 @@ function NetworksCard() {
             def.maxScript && `scripts ≤ ${def.maxScript} B`,
             typeof def.maxDataScript === "number" && `OP_RETURN ≤ ${def.maxDataScript} B`,
           ].filter(Boolean)
+          const hidden = settings.hidden.includes(c) && c !== active
           return (
             <div key={c} className={cn("flex flex-col gap-3 rounded-lg border p-4", c === active && "border-primary/50 bg-primary/5")}>
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <span className="flex min-w-0 flex-col gap-1">
+                <span className={cn("flex min-w-0 flex-col gap-1", hidden && "opacity-50")}>
                   <span className="flex items-center gap-2 font-medium">
                     <span className={cn("size-2.5 rounded-full", def.bg)} />
                     {def.label}
@@ -195,6 +208,15 @@ function NetworksCard() {
                   <span className="text-xs text-muted-foreground">{features.join(" · ")}</span>
                 </span>
                 <div className="flex gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={c === active}
+                    title={c === active ? "The selected network always shows in the navbar" : hidden ? "Show in the navbar" : "Hide from the navbar"}
+                    onClick={() => toggleHidden(c)}
+                  >
+                    {hidden ? <EyeIcon /> : <EyeOffIcon />} {hidden ? "Show" : "Hide"}
+                  </Button>
                   <Button variant="outline" size="sm" onClick={() => setEditing(editing === c ? null : c)}>
                     Sources{src?.custom ? " · custom" : ""}
                   </Button>
@@ -400,7 +422,14 @@ function WalletCard() {
           <div key={family} className="flex flex-col gap-2 rounded-lg border p-3">
             <span className="text-xs font-medium text-muted-foreground">{FAMILIES[family].label} account</span>
             <Info label="Derivation path" value={a.path} />
-            <Info label="Master fingerprint" value={a.fingerprint ? a.fingerprint.toString(16).padStart(8, "0") : "unknown"} />
+            {a.fingerprint || !wallet.watchOnly ? (
+              <Info label="Master fingerprint" value={a.fingerprint.toString(16).padStart(8, "0")} />
+            ) : (
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-4">
+                <span className="shrink-0 text-muted-foreground sm:w-44">Master fingerprint</span>
+                <SetFingerprint walletId={wallet.id} className="max-w-xs" />
+              </div>
+            )}
             <Info label="Account xpub" value={displayXpub(a.xpub, family)} />
           </div>
         ))}
@@ -424,67 +453,6 @@ function WalletCard() {
               </Button>
             )}
           </div>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
-/** Nostr keys allowed to open the app: ALLOWED_PUBKEYS (read-only) plus keys added here. */
-function AccessCard() {
-  const [access, setAccess] = useState<{ env: string[]; accounts: string[] } | null>(null)
-  const [npub, setNpub] = useState("")
-  useEffect(() => {
-    let live = true
-    api<{ env: string[]; accounts: string[] }>("/api/access")
-      .then((a) => live && setAccess(a))
-      .catch(() => {})
-    return () => {
-      live = false
-    }
-  }, [])
-  const change = async (action: "add" | "remove", pubkey: string) => {
-    try {
-      setAccess(await api("/api/access", { action, pubkey }))
-      if (action === "add") setNpub("")
-    } catch (e) {
-      toast.error("Couldn't update access", { description: (e as Error).message })
-    }
-  }
-  return (
-    <Card className="lg:col-span-2">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <UsersIcon className="size-4" /> Access
-        </CardTitle>
-        <CardDescription>Nostr keys that can log in. Every allowed key can open every wallet.</CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-2 text-sm">
-        {!access ? (
-          <p className="text-muted-foreground">Loading…</p>
-        ) : (
-          <>
-            {access.env.map((k) => (
-              <div key={k} className="flex items-center justify-between gap-2">
-                <code className="min-w-0 truncate font-mono text-xs">{k}</code>
-                <span className="shrink-0 text-xs text-muted-foreground">.env</span>
-              </div>
-            ))}
-            {access.accounts.map((k) => (
-              <div key={k} className="flex items-center justify-between gap-2">
-                <code className="min-w-0 truncate font-mono text-xs">{k}</code>
-                <Button size="sm" variant="ghost" onClick={() => change("remove", k)}>
-                  Remove
-                </Button>
-              </div>
-            ))}
-            <div className="flex gap-2 pt-1">
-              <Input placeholder="npub1…" className="font-mono text-xs" value={npub} onChange={(e) => setNpub(e.target.value)} />
-              <Button size="sm" disabled={!npub.trim()} onClick={() => change("add", npub.trim())}>
-                Allow
-              </Button>
-            </div>
-          </>
         )}
       </CardContent>
     </Card>

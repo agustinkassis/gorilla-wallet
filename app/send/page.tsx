@@ -16,6 +16,7 @@ import {
   CopyIcon,
   DownloadIcon,
   ExternalLinkIcon,
+  FingerprintIcon,
   Loader2Icon,
   PenLineIcon,
   PlusIcon,
@@ -28,6 +29,7 @@ import { toast } from "sonner"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { SetFingerprint } from "@/components/add-wallet"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -40,7 +42,6 @@ import { PsbtQr, QrImage } from "@/components/qr"
 import { QrScanner, type Scanned } from "@/components/qr-scanner"
 import { minDataScript } from "@/lib/chains"
 import { RecipientAddress } from "@/components/recipient-address"
-import { WatchOnlyBadge } from "@/components/wallet-switcher"
 import { copy, shorten } from "@/components/site-header"
 import { useWallet } from "@/components/wallet-provider"
 import { api, download } from "@/lib/api"
@@ -120,20 +121,6 @@ function Send() {
   const chain = wallet.chain
   const snap = wallet.snapshots[chain]
 
-  if (wallet.watchOnly)
-    return (
-      <Card className="mx-auto w-full max-w-lg">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            Sending is disabled <WatchOnlyBadge />
-          </CardTitle>
-          <CardDescription>
-            {wallet.wallet?.name} is a watch-only wallet: it has the xpub but no keys, so it can&apos;t sign. Switch to a wallet with keys from the
-            wallet menu, or add one.
-          </CardDescription>
-        </CardHeader>
-      </Card>
-    )
   if (!hasData(snap) || wallet.fingerprint === undefined || !wallet.xpub) return <Skeleton className="h-96 w-full rounded-xl" />
 
   return (
@@ -679,6 +666,20 @@ function SendForm({ chain, snap, mode, preselect }: { chain: Chain; snap: Snapsh
           )
         )}
 
+        {wallet.watchOnly && !wallet.fingerprint && wallet.wallet && (
+          <Alert>
+            <FingerprintIcon />
+            <AlertTitle>Add the master fingerprint for hardware wallets</AlertTitle>
+            <AlertDescription className="flex flex-col gap-2">
+              <span>
+                Hardware wallets use it to find their keys in the PSBT, so add it before signing there. It&apos;s shown in Sparrow&apos;s wallet
+                settings and on the device; pasting the output descriptor works too. Everything else works without it.
+              </span>
+              <SetFingerprint walletId={wallet.wallet.id} />
+            </AlertDescription>
+          </Alert>
+        )}
+
         <Button size="lg" disabled={!plan || busy || step.name !== "edit"} onClick={review}>
           {busy && step.name === "edit" ? <Loader2Icon className="animate-spin" /> : <PenLineIcon />} Review transaction
         </Button>
@@ -690,6 +691,7 @@ function SendForm({ chain, snap, mode, preselect }: { chain: Chain; snap: Snapsh
         explorer={snap.explorer}
         busy={busy}
         needsPassword={!!wallet.wallet?.needsPassword}
+        watchOnly={wallet.watchOnly}
         onSign={sign}
         onSigned={(signed) => setStep({ name: "signed", signed })}
         onBroadcast={broadcast}
@@ -729,6 +731,7 @@ function TxDialog({
   explorer,
   busy,
   needsPassword,
+  watchOnly,
   onSign,
   onSigned,
   onBroadcast,
@@ -740,6 +743,8 @@ function TxDialog({
   busy: boolean
   /** software wallet: signing asks for its password */
   needsPassword: boolean
+  /** no keys here: the PSBT can only be signed on another device */
+  watchOnly: boolean
   onSign: (psbt: Uint8Array, password?: string) => void
   /** a transaction signed elsewhere, already verified against the reviewed PSBT */
   onSigned: (signed: Signed) => void
@@ -771,7 +776,7 @@ function TxDialog({
                 step.plan.outputs.filter((o) => o.kind === "recipient").reduce((s, o) => s + o.amount, 0),
                 chain,
                 unit,
-              )} · fee ${step.plan.fee.toLocaleString()} sats (${(step.plan.fee / step.plan.vsize).toFixed(1)} sat/vB). Scan with a signing wallet, or let this wallet's backend sign it.`}
+              )} · fee ${step.plan.fee.toLocaleString()} sats (${(step.plan.fee / step.plan.vsize).toFixed(1)} sat/vB). ${watchOnly ? "Watch-only wallet: sign it on the device that holds the keys, then bring it back below." : "Scan with a signing wallet, or let this wallet's backend sign it."}`}
             {step.name === "signed" &&
               `${step.signed.vsize} vB · fee ${step.signed.fee.toLocaleString()} sats · txid ${shorten(step.signed.txid)}. Nothing is sent until you broadcast.`}
             {step.name === "sent" && "The network accepted the transaction. It will confirm in an upcoming block."}
@@ -786,6 +791,7 @@ function TxDialog({
               fee={step.plan.fee}
               busy={busy}
               needsPassword={needsPassword}
+              watchOnly={watchOnly}
               onSign={onSign}
               onSigned={onSigned}
               onEdit={onClose}
@@ -851,6 +857,7 @@ function ReviewStep({
   fee,
   busy,
   needsPassword,
+  watchOnly,
   onSign,
   onSigned,
   onEdit,
@@ -860,6 +867,7 @@ function ReviewStep({
   fee: number
   busy: boolean
   needsPassword: boolean
+  watchOnly: boolean
   onSign: (psbt: Uint8Array, password?: string) => void
   onSigned: (signed: Signed) => void
   onEdit: () => void
@@ -886,7 +894,7 @@ function ReviewStep({
 
             <div className="flex flex-col gap-2 rounded-lg border p-3">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-medium">Signed on another device?</span>
+                <span className="text-sm font-medium">{watchOnly ? "Bring back the signed transaction" : "Signed on another device?"}</span>
                 <div className="flex gap-1">
                   <Button size="sm" variant={external === "scan" ? "secondary" : "ghost"} onClick={() => setExternal(external === "scan" ? null : "scan")}>
                     <ScanLineIcon /> Scan
@@ -935,7 +943,7 @@ function ReviewStep({
               )}
             </div>
 
-            {needsPassword && (
+            {needsPassword && !watchOnly && (
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="wallet-password" className="text-xs">
                   Wallet password
@@ -955,9 +963,11 @@ function ReviewStep({
               <Button variant="outline" className="flex-1" disabled={busy} onClick={onEdit}>
                 Edit
               </Button>
-              <Button className="flex-1" disabled={busy || (needsPassword && !password)} onClick={() => onSign(psbt, needsPassword ? password : undefined)}>
-                {busy ? <Loader2Icon className="animate-spin" /> : <PenLineIcon />} Sign here
-              </Button>
+              {!watchOnly && (
+                <Button className="flex-1" disabled={busy || (needsPassword && !password)} onClick={() => onSign(psbt, needsPassword ? password : undefined)}>
+                  {busy ? <Loader2Icon className="animate-spin" /> : <PenLineIcon />} Sign here
+                </Button>
+              )}
             </DialogFooter>
     </>
   )

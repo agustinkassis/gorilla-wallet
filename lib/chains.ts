@@ -51,7 +51,7 @@ export const CHAINS: Record<Chain, ChainDef> = {
     text: "text-orange-600 dark:text-orange-400",
     bg: "bg-orange-500",
     family: "main",
-    electrum: ["ssl://electrum.blockstream.info:50002", "ssl://electrum.emzy.de:50002", "ssl://bitcoin.lu.ke:50002"],
+    electrum: ["ssl://electrum.blockstream.info:50002"],
     mempool: ["https://mempool.space"],
     replayPair: "xbt",
   },
@@ -85,7 +85,7 @@ export const CHAINS: Record<Chain, ChainDef> = {
     text: "text-emerald-600 dark:text-emerald-400",
     bg: "bg-emerald-500",
     family: "test",
-    electrum: ["ssl://electrum.blockstream.info:60002", "ssl://blockstream.info:993", "ssl://testnet.aranguren.org:51002"],
+    electrum: ["ssl://electrum.blockstream.info:60002", "ssl://blockstream.info:993"],
     mempool: ["https://mempool.space/testnet"],
   },
   signet: {

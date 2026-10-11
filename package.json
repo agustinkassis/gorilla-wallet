@@ -1,14 +1,14 @@
 {
   "name": "gorilla-wallet",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "bin": {
     "gorila": "bin/gorila.mjs"
   },
   "scripts": {
-    "dev": "prisma migrate deploy && next dev",
+    "dev": "prisma migrate deploy && next dev -H 127.0.0.1",
     "build": "next build",
-    "start": "prisma migrate deploy && next start",
+    "start": "prisma migrate deploy && next start -H 127.0.0.1",
     "lint": "eslint",
     "check:cli": "node scripts/check-cli-all.mjs",
     "check": "DATABASE_URL=file:./data/check.db prisma migrate deploy >/dev/null && DATABASE_URL=file:./data/check.db tsx --conditions=react-server scripts/check.ts",

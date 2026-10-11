@@ -1,11 +1,12 @@
 # 🦍 Gorilla Wallet
 
-A self-hosted, multi-wallet Bitcoin wallet with Nostr login, coin control, several networks (Bitcoin, the
+A self-hosted, multi-wallet Bitcoin wallet with optional Nostr login, coin control, several networks (Bitcoin, the
 **Blake2b (XBT)** fork, Testnet4, Testnet3, Signet) and a desktop app for macOS, Windows and Linux.
 
 Keys live only on your server. The browser gets each wallet's xpub (to derive addresses and build unsigned PSBTs)
-and asks the backend to sign over [NIP-98](https://github.com/nostr-protocol/nips/blob/master/98.md)
-authenticated requests from allowed Nostr pubkeys. It runs with an **empty `.env`**.
+and asks the backend to sign. It runs with an **empty `.env`**: no login, and only reachable from this machine. Set
+`ALLOWED_PUBKEYS` to require a [NIP-98](https://github.com/nostr-protocol/nips/blob/master/98.md) signed request from
+one of those Nostr keys on every API call.
 
 ## Download
 
@@ -19,8 +20,8 @@ Desktop builds are on the [Releases](https://github.com/agustinkassis/gorila-wal
 | Linux, Intel/AMD | `Gorilla.Wallet_<version>_amd64.AppImage` (standalone), `_amd64.deb`, `.x86_64.rpm` |
 | Linux, ARM64 | `Gorilla.Wallet_<version>_aarch64.AppImage` (standalone), `_arm64.deb`, `.aarch64.rpm` |
 
-The builds aren't signed yet: on macOS open it once via System Settings → Privacy & Security → Open Anyway; on Windows
-choose More info → Run anyway; on Linux `chmod +x` the AppImage and run it.
+macOS builds are signed with an Apple Developer ID and notarized, so they open without a warning. Windows installers
+are unsigned (More info → Run anyway); on Linux `chmod +x` the AppImage and run it.
 
 ## Run it locally
 
@@ -35,9 +36,12 @@ pnpm install          # also generates the Prisma client
 pnpm dev              # applies migrations, starts on http://localhost:3000
 ```
 
-Open http://localhost:3000, connect your Nostr extension (the first login claims the app), then create or import a
-wallet. For a production server: `pnpm build && pnpm start`. To build the desktop app instead, see
-[Desktop app](#desktop-app).
+Open http://localhost:3000 and create or import a wallet. For a production server: `pnpm build && pnpm start`. To
+build the desktop app instead, see [Desktop app](#desktop-app).
+
+`dev` and `start` listen on `127.0.0.1` only. Without `ALLOWED_PUBKEYS` the API also refuses any request not addressed
+to localhost or coming from another site, so never expose that port (not even behind a reverse proxy). To use it from
+other machines, set `ALLOWED_PUBKEYS` and run `pnpm db:migrate && pnpm next start -H 0.0.0.0` (or proxy to it).
 
 ## Wallets
 
@@ -74,7 +78,8 @@ Each chain can use several Electrum servers and mempool.space-compatible explore
 
 ## Features
 
-- **Nostr login** (NIP-07 extension), avatar in the navbar, NIP-98 + allowlist on every API call
+- **Optional Nostr login** (NIP-07 extension) with `ALLOWED_PUBKEYS`: avatar in the navbar, NIP-98 + allowlist on every
+  API call. Without it, local-only access
 - **Live balances and transactions** over SSE from Electrum/Fulcrum subscriptions, with server failover
 - **Send**: batch recipients, Send max, coin control (auto-suggested UTXOs), fee manager with mempool estimates
 - **Review → Sign → Broadcast** modal: unsigned PSBT as animated QR (UR `crypto-psbt`, BBQr, base64, `.psbt`); sign here,
@@ -117,17 +122,18 @@ Copy `.env.example` to `.env` only to change a default.
 |---|---|
 | `SEED_PHRASE` | Optional default wallet (BIP39). Never sent to the browser or stored |
 | `DERIVATION_PATH` | Its account path, default `m/84'/0'/0'` (P2WPKH) |
-| `ALLOWED_PUBKEYS` | Optional npub/hex allowlist. Without it the first login is the owner (Settings → Access) |
+| `ALLOWED_PUBKEYS` | Optional npub/hex allowlist. Set: every API call needs a NIP-98 login from one of these keys. Unset: no login, localhost only |
 | `<CHAIN>_ELECTRUM` | Comma-separated `tcp://` / `ssl://` Electrum servers, tried in order (`BTC_ELECTRUM`, `XBT_ELECTRUM`, `TBTC4_ELECTRUM`, …). Settings → Networks overrides it |
+| `ELECTRUM_SELF_SIGNED` | Comma-separated Electrum hosts whose `ssl://` certificate isn't verified (a self-signed node you trust). Every other `ssl://` server needs a valid certificate |
 | `MEMPOOL_<CHAIN>_URL` | mempool.space-compatible APIs: fees, broadcast, explorer links (`MEMPOOL_BTC_URL`, …) |
 | `DATABASE_URL` | SQLite file (default `file:./data/wallet.db`) |
 
 ## Desktop app
 
 `src-tauri/` wraps the app in [Tauri](https://tauri.app) for macOS, Windows and Linux. It bundles the Next.js server
-(standalone) and Node, starts them on `localhost`, and keeps the database, `server.log` and the app's Nostr key in the
-OS app-data folder (`com.gorillawallet.desktop`). Webviews have no NIP-07 extensions, so the app signs in with its own
-device key (first launch claims it). No `.env` is read or bundled.
+(standalone) and Node, starts them on `localhost`, and keeps the database and `server.log` in the
+OS app-data folder (`com.gorillawallet.desktop`). No `.env` is read or bundled, so it runs without login, reachable only
+from this machine.
 
 Building needs [Rust](https://rustup.rs) and, on Linux, `libwebkit2gtk-4.1-dev librsvg2-dev patchelf`:
 
@@ -137,9 +143,77 @@ pnpm tauri build      # installers in src-tauri/target/release/bundle/
 
 Builds are native (Node and better-sqlite3 are bundled for the host), so each OS/arch builds on its own:
 `.github/workflows/desktop.yml` builds macOS (arm64, x64), Windows (x64, arm64) and Linux (x64, arm64) as workflow
-artifacts; a `v*` tag also creates a draft release. The installers are unsigned (macOS: ad-hoc), so the first launch
-needs System Settings → Privacy & Security → Open Anyway on macOS, and More info → Run anyway on Windows. App icon gorilla:
-[Twemoji](https://github.com/jdecked/twemoji), CC-BY 4.0.
+artifacts; a `v*` tag also creates a draft release (see [Releasing](#releasing)). macOS builds are Developer ID signed
+and notarized when the secrets below exist (ad-hoc signed otherwise, except on a tag, which fails); Windows installers
+are unsigned (SmartScreen: More info → Run anyway). The app icon, favicon and sidebar use the official logo
+(`src-tauri/app-icon.svg`, `components/logo.tsx`); after changing it, run `pnpm tauri icon src-tauri/app-icon.svg` and
+keep only the files already in `src-tauri/icons/`. The boot screens (`src-tauri/splash/`, `components/splash.tsx`) show
+the cover image with a progress bar and the version.
+
+### Signed macOS builds
+
+macOS only opens downloaded apps without a warning when they are signed with an Apple **Developer ID** and notarized
+by Apple. The workflow does both with these repository secrets (GitHub → Settings → Secrets and variables → Actions).
+They are already set; this is how to set them up again (new certificate, renewed or revoked key, another repository).
+
+| Secret | Value |
+|---|---|
+| `APPLE_CERTIFICATE` | Your *Developer ID Application* certificate exported as `.p12`, base64-encoded |
+| `APPLE_CERTIFICATE_PASSWORD` | The password you set when exporting that `.p12` |
+| `APPLE_API_KEY_ID` | An App Store Connect API key's Key ID (used to notarize) |
+| `APPLE_API_ISSUER` | That key's Issuer ID |
+| `APPLE_API_KEY_P8` | The contents of the key's `AuthKey_<KeyID>.p8` file |
+
+1. **Join the Apple Developer Program** at <https://developer.apple.com/programs/enroll/> (99 USD/year; an organization
+   needs a D-U-N-S number). Approval usually takes a day or two.
+2. **Create the certificate** (as the account holder): in Xcode, Settings → Accounts → your team → Manage
+   Certificates → **+** → *Developer ID Application*. Without Xcode: Keychain Access → Certificate Assistant → Request a
+   Certificate From a Certificate Authority (saved to disk), then upload it at
+   <https://developer.apple.com/account/resources/certificates/add> as *Developer ID Application* (G2 Sub-CA) and
+   double-click the downloaded `.cer`.
+3. **Export it**: Keychain Access → login → My Certificates → *Developer ID Application: Your Name (TEAMID)* (with its
+   private key) → Export → `DeveloperID.p12`, with a password.
+4. **Create an API key for notarization**: <https://appstoreconnect.apple.com> → Users and Access → Integrations →
+   App Store Connect API → **Team Keys** (not *Individual Keys*: those have no Issuer ID) → **+**, access *Developer* →
+   download `AuthKey_<KeyID>.p8` (only downloadable once) and note its Key ID. The **Issuer ID** is the UUID shown
+   above that table (`xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`, with a Copy button).
+5. **Add the secrets**:
+
+   ```bash
+   base64 -i DeveloperID.p12 | gh secret set APPLE_CERTIFICATE --repo agustinkassis/gorila-wallet
+   gh secret set APPLE_CERTIFICATE_PASSWORD --repo agustinkassis/gorila-wallet   # prompts for it
+   gh secret set APPLE_API_KEY_ID --repo agustinkassis/gorila-wallet --body "<Key ID>"
+   pbpaste | tr -d '[:space:]"' | gh secret set APPLE_API_ISSUER --repo agustinkassis/gorila-wallet   # Issuer ID copied
+   gh secret set APPLE_API_KEY_P8 --repo agustinkassis/gorila-wallet < AuthKey_<KeyID>.p8
+   ```
+
+6. **Check** with a run from Actions → Desktop → Run workflow: the macOS jobs import the certificate into a temporary
+   keychain, sign the app, the bundled Node and its native modules with the hardened runtime, notarize with the API
+   key, staple the ticket and check that Gatekeeper accepts it. Then delete the local `.p12` and `.p8`.
+
+The Developer ID certificate expires after 5 years, and the Apple Developer Program needs renewing every year: an
+expired membership fails notarization.
+
+### Releasing
+
+Every release ships the same installers: macOS (arm64, x64), Windows (x64, arm64), Linux (x64, arm64).
+
+1. On `main`, bump `version` in `package.json` (e.g. `0.1.1`), commit and push.
+2. Tag that commit with the same version and push the tag:
+
+   ```bash
+   git tag v0.1.1 && git push origin v0.1.1
+   ```
+
+3. Wait for [Actions → Desktop](https://github.com/agustinkassis/gorila-wallet/actions/workflows/desktop.yml) (about 15
+   minutes). On a tag the workflow fails rather than ship something incomplete: the tag must equal `v` + the
+   `package.json` version, the macOS apps must be Developer ID signed, notarized and accepted by Gatekeeper, and the
+   draft release is only created when all six builds succeed. A flaky failure: Re-run failed jobs (the release job
+   replaces the files of an existing draft). A failure that needs a code fix: delete the tag
+   (`git push --delete origin v0.1.1 && git tag -d v0.1.1`), fix on `main` and tag again.
+4. Open the draft on [Releases](https://github.com/agustinkassis/gorila-wallet/releases), review the generated notes
+   and files (10: two `.dmg`, two `-setup.exe`, and an AppImage, `.deb` and `.rpm` per Linux arch), and **Publish
+   release**.
 
 ## Scripts
 
@@ -158,7 +232,9 @@ needs System Settings → Privacy & Security → Open Anyway on macOS, and More 
 
 - The backend signs only inputs that are provably this wallet's coins (derivation path, fingerprint and script checked
   against the real parent transaction), refuses frozen coins and chain-rule violations, and caps fee rates.
-- POST bodies are bound to the NIP-98 signature (`payload` tag), so a captured token can't carry a different body.
+- POST bodies are bound to the NIP-98 signature (`payload` tag). Each write event is accepted once, including across restarts; clients must sign a fresh event for retries.
+- `ssl://` Electrum servers must present a valid certificate, except hosts listed in `ELECTRUM_SELF_SIGNED`; `tcp://`
+  servers are unauthenticated. Raw transactions are checked against their txid, from the network and from the cache.
 - Software wallets with a password store their recovery words only encrypted with it; a stolen database can't spend
   them. Wallets created without a password can be spent by anyone with the database.
   Watch-only wallets can't sign. `.env` and `data/` are git-ignored.

@@ -122,11 +122,21 @@ class ChainClient {
 
   /** Raw tx hex: SQLite cache first, then Electrum (and cache it — raw txs never change). */
   async rawHex(txid: string) {
+    if (!/^[0-9a-f]{64}$/.test(txid)) throw new Error("Invalid transaction ID")
+    // Servers are untrusted, and older versions cached their answers unchecked: the bytes must hash to the txid.
+    const matches = (hex: unknown): hex is string => {
+      try {
+        return typeof hex === "string" && parseTx(hex).id === txid
+      } catch {
+        return false
+      }
+    }
     const where = { chain_txid: { chain: this.chain, txid } }
     const row = await db.rawTx.findUnique({ where })
-    if (row) return row.hex
-    const hex = await this.client.request<string>("blockchain.transaction.get", [txid])
-    await db.rawTx.upsert({ where, create: { chain: this.chain, txid, hex }, update: {} })
+    if (row && matches(row.hex)) return row.hex
+    const hex = await this.client.request<unknown>("blockchain.transaction.get", [txid])
+    if (!matches(hex)) throw new Error("Transaction ID mismatch")
+    await db.rawTx.upsert({ where, create: { chain: this.chain, txid, hex }, update: { hex } })
     return hex
   }
 
@@ -489,7 +499,7 @@ class WalletSync {
       db.addressState.findMany({ where: { walletId, chain } }),
       db.utxo.findMany({ where: { walletId, chain }, orderBy: { value: "desc" } }),
       db.tx.findMany({ where: { walletId, chain } }),
-      db.label.findMany({ where: { walletId, chain: { in: [chain, "all"] } } }),
+      db.label.findMany({ where: { walletId, chain } }),
     ])
     const state = new Map(states.map((s) => [s.address, s]))
     const label = new Map(labels.map((l) => [`${l.type}:${l.ref}`, l]))
@@ -625,6 +635,7 @@ export async function openSyncSession(wallets: WalletInfo[], chains: Chain[], ti
       const selected = wallets.filter((wallet) => wallet.accounts[CHAINS[chain].family])
       if (!selected.length) continue
       const sources = config.sources(chain, settings)
+      if (!sources.electrum.length) throw new Error(`No Electrum server configured for ${CHAINS[chain].label}: use gorila config set --chain ${chain} --electrum URL`)
       const client = new ChainClient(chain, sources.electrum, sources.mempool)
       clients.set(chain, client)
       for (const wallet of selected) client.syncs.set(wallet.id, new WalletSync(wallet, client))

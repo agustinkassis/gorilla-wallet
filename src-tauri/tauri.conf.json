@@ -4,8 +4,9 @@
   "version": "../package.json",
   "identifier": "com.gorillawallet.desktop",
   "build": {
+    "frontendDist": "splash",
     "beforeBuildCommand": "node scripts/desktop.mjs",
-    "beforeDevCommand": "node scripts/desktop.mjs"
+    "beforeDevCommand": { "script": "node scripts/desktop.mjs", "wait": true }
   },
   "app": {
     "windows": []
