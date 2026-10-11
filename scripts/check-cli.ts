@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtemp, writeFile, rm } from "node:fs/promises"
+import { mkdtemp, writeFile, rm, readFile, chmod } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve, join } from "node:path"
 import { spawn } from "node:child_process"
@@ -26,7 +26,10 @@ async function main() {
   const passwordFile = join(temporary, "password.txt")
   const passphraseFile = join(temporary, "passphrase.txt")
   await Promise.all([writeFile(seedFile, mnemonic), writeFile(passwordFile, "password123"), writeFile(passphraseFile, "separate BIP39 passphrase")])
-  const env: NodeJS.ProcessEnv = { ...process.env, DATABASE_URL: `file:${join(temporary, "wallet.db")}`, SEED_PHRASE: "", NODE_ENV: "test" }
+  const crontabFile = join(temporary, "crontab.txt")
+  const crontabBin = join(temporary, "fake-crontab.sh")
+  await writeFile(crontabBin, `#!/bin/sh\nif [ "$1" = "-l" ]; then\n  if [ -f "${crontabFile}" ]; then cat "${crontabFile}"; exit 0; fi\n  echo "no crontab for fixture" >&2; exit 1\nfi\nif [ "$1" = "-" ]; then cat > "${crontabFile}"; exit 0; fi\nexit 2\n`, { mode: 0o755 })
+  const env: NodeJS.ProcessEnv = { ...process.env, DATABASE_URL: `file:${join(temporary, "wallet.db")}`, SEED_PHRASE: "", NODE_ENV: "test", GORILA_CRONTAB_BIN: crontabBin, XDG_STATE_HOME: join(temporary, "state") }
   const sockets = new Set<net.Socket>()
   const broadcasts: { chain: string; hex: string }[] = []
   let rejectBroadcast = false
@@ -89,6 +92,7 @@ async function main() {
       if (failStatus) { response.writeHead(503); response.end() }
       else if (request.url.includes("aa".repeat(32))) response.end(JSON.stringify({ confirmed: true, block_height: 140 }))
       else if (request.url.includes("bb".repeat(32)) || request.url.includes("dd".repeat(32))) response.end(JSON.stringify({ confirmed: false }))
+      else if (broadcasts.some((b) => request.url?.includes(parseTxHex(b.hex).id))) response.end(JSON.stringify({ confirmed: false }))
       else { response.writeHead(404); response.end() }
     } else if (request.url?.endsWith(`/api/tx/${"bb".repeat(32)}`)) {
       response.end(JSON.stringify({ txid: "bb".repeat(32) }))
@@ -183,6 +187,101 @@ async function main() {
     rejectBroadcast = true
     assert.match((await invoke([...send, "--chain", "btc", "--yes"], false)).error, /Rejected by fixture network/)
     assert.equal(broadcasts.length, 2)
+    rejectBroadcast = false
+
+    // forward: rules, crontab blocks, unattended sweeps with OP_RETURN
+    await writeFile(crontabFile, "0 3 * * * /usr/bin/true # unrelated\n")
+    const foreign = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
+    type RuleOptions = { chain?: string; from?: string; to?: string; every?: string; cap?: string; wallet?: string }
+    const rule = (extra: string[], o: RuleOptions = {}) => ["forward", "add", "--wallet", o.wallet ?? "fixture", "--chain", o.chain ?? "btc", "--from", o.from ?? address, "--to", o.to ?? destination, "--every", o.every ?? "5", "--max-fee-rate", o.cap ?? "5", ...extra]
+    assert.match((await invoke(rule([]), false)).error, /confirmation or --yes/)
+    assert.match((await invoke(rule(["--yes"], { chain: "xbt" }), false)).error, /OP_RETURN/)
+    assert.match((await invoke(rule(["--yes"], { from: foreign }), false)).error, /does not belong/)
+    assert.match((await invoke(rule(["--yes"], { to: address }), false)).error, /same address/)
+    assert.match((await invoke(rule(["--yes"], { to: address.toUpperCase() }), false)).error, /same address/)
+    assert.match((await invoke(rule(["--yes"], { every: "7" }), false)).error, /--every/)
+    assert.match((await invoke(rule(["--yes"], { cap: "0" }), false)).error, /max-fee-rate/)
+    const lockedAddress = (await invoke(["addresses", "--wallet", created.wallet.id])).result.addresses[0].address
+    const encryptedRule = rule(["--yes"], { wallet: created.wallet.id, from: lockedAddress })
+    assert.match((await invoke(encryptedRule, false)).error, /--password-file/)
+    assert.match((await invoke([...encryptedRule, "--password-file", passwordFile], false)).error, /permissions/)
+    await chmod(wrongFile, 0o600)
+    assert.match((await invoke([...encryptedRule, "--password-file", wrongFile], false)).error, /password/i)
+    assert.equal(broadcasts.length, 2)
+
+    const capped = (await invoke(rule(["--yes"], { cap: "1" }))).result
+    assert.match(capped.rule.id, /^[0-9a-f]{8}$/)
+    assert.equal(capped.rule.opReturn, "random-90")
+    assert.equal(capped.cron.schedule, "*/5 * * * *")
+    const crontab = await readFile(crontabFile, "utf8")
+    assert.match(crontab, /unrelated/)
+    assert.ok(crontab.includes(`# BEGIN gorila-forward ${capped.rule.id}`) && crontab.includes(`# END gorila-forward ${capped.rule.id}`))
+    assert.ok(crontab.includes(`forward run ${capped.rule.id}`))
+    assert.ok(crontab.includes(`DATABASE_URL='file:${join(temporary, "wallet.db")}'`))
+    const skipped = (await invoke(["forward", "run", capped.rule.id])).result
+    assert.equal(skipped.status, "skipped")
+    assert.match(skipped.reason, /fee above cap/)
+    assert.equal(broadcasts.length, 2)
+
+    const fresh = (await invoke(rule(["--yes", "--min-conf", "60"]))).result
+    assert.equal((await invoke(["forward", "run", fresh.rule.id])).result.status, "idle")
+
+    const message = "forwarded by gorila"
+    const tagged = (await invoke(rule(["--yes", "--message", message], { every: "60" }))).result
+    assert.equal(tagged.cron.schedule, "0 * * * *")
+    const taggedPlan = (await invoke(["forward", "run", tagged.rule.id, "--dry-run"])).result
+    assert.equal(taggedPlan.status, "dry-run")
+    assert.ok(Buffer.from(taggedPlan.dataHex, "hex").toString("utf8").startsWith(message))
+
+    const sweeping = (await invoke(rule(["--yes"]))).result
+    const dry = await Promise.all([invoke(["forward", "run", sweeping.rule.id, "--dry-run"]), invoke(["forward", "run", sweeping.rule.id, "--dry-run"])])
+    for (const d of dry) {
+      assert.equal(d.result.status, "dry-run")
+      assert.equal(d.result.dataHex.length, 180)
+      assert.deepEqual(d.result.inputs.map((input: { txid: string }) => input.txid), [btc.id])
+      assert.equal(d.result.amount + d.result.fee, 100_000)
+    }
+    assert.notEqual(dry[0].result.dataHex, dry[1].result.dataHex)
+    assert.equal(broadcasts.length, 2)
+    const runs = await Promise.all([invoke(["forward", "run", sweeping.rule.id]), invoke(["forward", "run", sweeping.rule.id])])
+    assert.equal(broadcasts.length, 3)
+    assert.equal(runs.filter((r) => r.result.status === "sent").length, 1)
+    const sent = runs.find((r) => r.result.status === "sent")!.result
+    const forwarded = parseTxHex(broadcasts[2].hex)
+    assert.equal(forwarded.id, sent.txid)
+    assert.equal(forwarded.inputsLength, 1)
+    assert.equal(forwarded.outputsLength, 2)
+    const outputs = [0, 1].map((i) => forwarded.getOutput(i))
+    const data = outputs.find((o) => o.script?.[0] === 0x6a)!
+    assert.equal(data.script!.length, 93)
+    assert.equal(outputs.find((o) => o.script?.[0] !== 0x6a)!.amount, BigInt(sent.amount))
+    assert.equal(sent.amount + sent.fee, 100_000)
+    assert.equal(sent.feeRate, 2)
+    assert.equal((await invoke(["forward", "run", sweeping.rule.id])).result.status, "idle")
+    assert.equal(broadcasts.length, 3)
+
+    const listed = (await invoke(["forward", "list"])).result.rules
+    assert.equal(listed.length, 4)
+    assert.ok(listed.every((r: { cron: string }) => r.cron === "installed"))
+    assert.equal(listed.find((r: { id: string }) => r.id === sweeping.rule.id).lastRun.status, "sent")
+    const detail = (await invoke(["forward", "show", sweeping.rule.id])).result
+    assert.equal(detail.runs[0].txid, sent.txid)
+    assert.ok(detail.cron.line.includes(`forward run ${sweeping.rule.id}`))
+    assert.equal((await invoke(["forward", "show", capped.rule.id])).result.runs[0].status, "skipped")
+    await writeFile(crontabFile, (await readFile(crontabFile, "utf8")).split("\n").filter((line) => !line.includes(fresh.rule.id)).join("\n"))
+    assert.equal((await invoke(["forward", "list"])).result.rules.find((r: { id: string }) => r.id === fresh.rule.id).cron, "missing")
+    const removed = (await invoke(["forward", "remove", sweeping.rule.id])).result
+    assert.equal(removed.cronRemoved, true)
+    const after = await readFile(crontabFile, "utf8")
+    assert.ok(!after.includes(sweeping.rule.id))
+    assert.ok(after.includes(capped.rule.id) && after.includes("unrelated"))
+    assert.match((await invoke(["forward", "show", sweeping.rule.id], false)).error, /Unknown forward rule/)
+    assert.equal((await invoke(["forward", "remove", fresh.rule.id])).result.cronRemoved, false)
+    assert.equal((await invoke(["forward", "list"])).result.rules.length, 2)
+    const unterminated = `# BEGIN gorila-forward ${capped.rule.id}\n* * * * * forward run ${capped.rule.id}\n0 4 * * * /usr/bin/true # after\n`
+    await writeFile(crontabFile, unterminated)
+    assert.match((await invoke(["forward", "remove", capped.rule.id], false)).error, /no "# END gorila-forward/)
+    assert.equal(await readFile(crontabFile, "utf8"), unterminated)
     assert.match((await invoke(["balance", "--wallet", "fixture", "--electrum", "tcp://evil:1"], false)).error, /not valid/)
     console.log("CLI checks passed: all commands, shared database, secrets, satoshi balances, review/sign/broadcast fixtures, two-process cursor, foreign cwd and JSON")
   } finally {

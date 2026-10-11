@@ -38,16 +38,16 @@ export async function secret(file: string | undefined, prompt: string, required 
   }
 }
 
-export async function confirm() {
+export async function confirm(question = "Sign and broadcast? Type yes: ", cancelled = "Cancelled; transaction was not signed or broadcast") {
   if (!process.stdin.isTTY || !process.stderr.isTTY) throw new CliError("Sending requires terminal confirmation or --yes")
   const rl = createInterface({ input: process.stdin, output: process.stderr })
   const abort = new AbortController()
   rl.once("SIGINT", () => abort.abort())
   try {
-    const answer = await rl.question("Sign and broadcast? Type yes: ", { signal: abort.signal }).catch((error: unknown) => {
-      if (abort.signal.aborted) throw new CliError("Cancelled; transaction was not signed or broadcast")
+    const answer = await rl.question(question, { signal: abort.signal }).catch((error: unknown) => {
+      if (abort.signal.aborted) throw new CliError(cancelled)
       throw error
     })
-    if (answer.trim() !== "yes") throw new CliError("Cancelled; transaction was not signed or broadcast")
+    if (answer.trim() !== "yes") throw new CliError(cancelled)
   } finally { rl.close() }
 }

@@ -15,6 +15,7 @@ import { broadcastHex, validateBroadcast } from "@/lib/server/broadcast"
 import { deriveAddress, type WalletInfo, type Snapshot } from "@/lib/wallet"
 import { CHAINS, familyOf, syncedChains, type Chain } from "@/lib/chains"
 import { INPUT_VSIZE, buildPsbt, feeAt, planTx, type Coin } from "@/lib/tx"
+import { forwardCommand } from "@/lib/cli/forward"
 
 export const HELP = `gorila - Bitcoin (BTC), Blake2b (XBT) and local regtest, amounts in satoshis
 
@@ -32,10 +33,17 @@ tx-status TXID --chain btc|xbt|regtest
 config show
 config set --chain btc|xbt|regtest [--electrum URL ...] [--mempool URL ...]
 send --chain btc|xbt|regtest --to ADDRESS --amount-sats N [--message TEXT] [--fee-rate N] [--yes]
+forward add --chain btc|regtest --from ADDRESS --to ADDRESS --every MINUTES --max-fee-rate N [--min-conf N] [--message TEXT] [--password-file FILE] [--yes]
+forward list
+forward show ID [--runs N]
+forward remove ID
+forward run ID [--dry-run]
 
 Common: --wallet ID_OR_NAME, --json, --timeout SECONDS (default 120), --help
 Network commands accept --password-file FILE to enable a missing encrypted wallet account.
 Secrets use hidden terminal prompts or explicit files. --passphrase prompts for a BIP39 passphrase.
+forward add installs a crontab entry that sweeps --from's confirmed coins to --to with an OP_RETURN
+(--message, or 90 random bytes per send); runs above --max-fee-rate wait for the next one.
 `
 
 const commandOptions: Record<string, readonly string[]> = {
@@ -48,6 +56,8 @@ const commandOptions: Record<string, readonly string[]> = {
   balance: ["chain", "all-wallets", "password-file"], transactions: ["chain", "password-file"], "tx-status": ["chain", "password-file"],
   "config show": [], "config set": ["chain", "electrum", "mempool"],
   send: ["chain", "to", "amount-sats", "message", "fee-rate", "yes", "password-file"],
+  "forward add": ["chain", "from", "to", "every", "min-conf", "max-fee-rate", "message", "password-file", "yes"],
+  "forward list": [], "forward show": ["runs"], "forward remove": [], "forward run": ["dry-run"],
 }
 function required(args: Args, name: string) {
   const value = args.value(name)
@@ -100,7 +110,7 @@ export async function runCli(argv: readonly string[]) {
   const args = parseArgs(argv)
   if (args.flags.has("help") || !args.positionals.length) return { help: HELP }
   const first = args.positionals[0]
-  const grouped = ["wallet", "config", "address"].includes(first)
+  const grouped = ["wallet", "config", "address", "forward"].includes(first)
   const command = grouped ? args.positionals.slice(0, 2).join(" ") : first
   const allowed = commandOptions[command]
   if (!allowed) throw new CliError(`Unknown command: ${command}. Use --help`)
@@ -108,10 +118,12 @@ export async function runCli(argv: readonly string[]) {
   for (const option of [...Object.keys(args.values), ...args.flags]) {
     if (!common.includes(option) && !allowed.includes(option)) throw new CliError(`--${option} is not valid for ${command}`)
   }
-  const positionalCount = command === "address label" ? 4 : command === "tx-status" ? 2 : grouped ? 2 : 1
+  const forwardWithId = ["forward show", "forward remove", "forward run"].includes(command)
+  const positionalCount = command === "address label" ? 4 : forwardWithId ? 3 : command === "tx-status" ? 2 : grouped ? 2 : 1
   if (args.positionals.length !== positionalCount) throw new CliError(`Invalid arguments for ${command}. Use --help`)
   const timeoutMs = positiveInteger(args.value("timeout") ?? "120", "timeout") * 1000
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs > 2_147_483_647) throw new CliError("timeout is too large")
+  if (command.startsWith("forward ")) return forwardCommand(command, args, timeoutMs)
   if (command === "config show") {
     const settings = await getSettings()
     return { chains: (["btc", "xbt", "regtest"] as const).map((chain) => {

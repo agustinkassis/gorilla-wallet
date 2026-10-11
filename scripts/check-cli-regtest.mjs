@@ -4,6 +4,7 @@ import { harness } from './regtest/harness.mjs'
 import { scenarios } from './regtest/scenarios.mjs'
 import { interactive } from './regtest/interactive.mjs'
 import { edges } from './regtest/edges.mjs'
+import { forward } from './regtest/forward.mjs'
 
 const h = await harness()
 let passed = false
@@ -12,6 +13,7 @@ try {
   await scenarios(h)
   await edges(h)
   await interactive(h)
+  await forward(h)
   passed = true
 } catch (error) {
   console.error(error)

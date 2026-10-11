@@ -174,6 +174,59 @@ relleno hasta el tamaño mínimo. XBT rechaza `--message` y firma con
 outputs, monedas congeladas y límites de comisión; web y CLI aplican las mismas
 validaciones de publicación normal. Un rechazo de la red se devuelve como error.
 
+## Reenvío automático
+
+Una regla de reenvío vigila una dirección A de la wallet y, en cada ejecución,
+envía todas sus monedas a una dirección B con un OP_RETURN. gorila instala una
+entrada propia en el crontab del usuario.
+
+```sh
+gorila forward add --wallet ahorro --chain btc --from bc1qA... --to bc1qB... \
+  --every 5 --max-fee-rate 10
+gorila forward add --wallet ahorro --chain btc --from bc1qA... --to bc1qB... \
+  --every 60 --max-fee-rate 5 --min-conf 3 --message "pago reenviado"
+gorila forward list
+gorila forward show 1a2b3c4d --runs 50
+gorila forward run 1a2b3c4d --dry-run
+gorila forward remove 1a2b3c4d
+```
+
+- **A** tiene que ser una dirección ya derivada de la wallet (ver `addresses`);
+  **B** puede ser cualquier dirección de la cadena. Cada ejecución gasta solo las
+  monedas de A, sin cambio: B recibe el total menos la comisión.
+- **Cadenas:** `btc` y `regtest`. XBT no admite OP_RETURN y se rechaza.
+- **OP_RETURN:** sin `--message`, cada envío lleva 90 bytes aleatorios nuevos.
+  Con `--message`, ese texto UTF-8, rellenado hasta el mínimo de BTC.
+- **Confirmaciones:** `--min-conf` (1 por defecto). Las monedas con menos
+  confirmaciones esperan a la siguiente ejecución.
+- **Comisión:** la estimación de una hora de la red. Si supera
+  `--max-fee-rate`, la ejecución no envía, registra `skipped` y vuelve a
+  intentar en el próximo ciclo.
+- **Intervalo:** `--every` acepta 1, 2, 3, 4, 5, 6, 10, 12, 15, 20 o 30 minutos,
+  o 60, 120, 180, 240, 360, 480, 720 o 1440 (horas enteras que dividen el día).
+- **Wallets cifradas:** necesitan `--password-file` con permisos `600`. Se
+  verifica la contraseña al crear la regla y el cron lee el archivo en cada envío.
+
+Crear una regla pide confirmación en la terminal, o `--yes`. Cada regla ocupa un
+bloque `# BEGIN gorila-forward ID` … `# END gorila-forward ID`; el resto del
+crontab no se toca. La línea usa rutas absolutas a Node, al CLI y a la base de
+datos, y conserva `NODE_EXTRA_CA_CERTS` si estaba definido. La salida de cada
+ejecución se agrega a `~/.local/state/gorila/forward-ID.log` (o
+`$XDG_STATE_HOME/gorila/`).
+
+`list` muestra si cada bloque de cron está `installed` o `missing` y el
+resultado de la última ejecución. `show` agrega la línea de cron, la ruta del log
+y el historial de ejecuciones: `sent` con su txid, `skipped` o `error` con el
+motivo. Los chequeos sin monedas nuevas no se registran; solo actualizan la hora
+del último chequeo. `remove` quita el bloque del crontab y borra la regla y su
+historial; el log se conserva.
+
+Dos ejecuciones solapadas de la misma regla no envían dos veces: la segunda sale
+con `busy`. Las monedas ya reenviadas no se vuelven a usar mientras su
+transacción siga en la red. `run --dry-run` muestra el envío que se haría sin
+firmar ni publicar. `GORILA_CRONTAB_BIN` reemplaza el binario `crontab`, para
+pruebas.
+
 ## Bitcoin regtest
 
 Regtest permite probar recepción, firma y publicación contra un nodo Bitcoin
