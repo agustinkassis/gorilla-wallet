@@ -11,7 +11,7 @@ export async function interactive(h) {
     let stdout = '', stderr = ''
     child.stdout.on('data', chunk => { stdout += chunk })
     child.stderr.on('data', chunk => { stderr += chunk })
-    child.stdin.end(JSON.stringify({ command: [process.execPath, join(h.root, 'bin/gorila.mjs'), ...args, '--json', '--timeout', '20'], actions: actions.map(([prompt, input]) => ({ prompt, hex: Buffer.from(input).toString('hex') })) }))
+    child.stdin.end(JSON.stringify({ command: [process.execPath, join(h.root, 'bin/gorilla.mjs'), ...args, '--json', '--timeout', '20'], actions: actions.map(([prompt, input]) => ({ prompt, hex: Buffer.from(input).toString('hex') })) }))
     const [code] = await once(child, 'close')
     assert.equal(code, 0, stderr)
     const result = JSON.parse(stdout)

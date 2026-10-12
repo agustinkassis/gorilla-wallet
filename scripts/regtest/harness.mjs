@@ -9,7 +9,7 @@ import { once } from 'node:events'
 
 export async function harness() {
   const root = resolve(import.meta.dirname, '../..')
-  const project = `gorila-regtest-${process.pid}-${Date.now()}`
+  const project = `gorilla-regtest-${process.pid}-${Date.now()}`
   const directory = resolve(process.env.REGTEST_EVIDENCE_DIR || join(tmpdir(), project, 'evidence'))
   mkdirSync(directory, { recursive: true })
   const temporary = mkdtempSync(join(tmpdir(), `${project}-`))
@@ -39,7 +39,7 @@ export async function harness() {
     throw new Error(`Timed out: ${label}: ${detail ?? ''}`)
   }
   const cli = async (args, success = true) => {
-    const invocation = [process.execPath, join(root, 'bin/gorila.mjs'), ...args, '--json', ...(args.includes('--timeout') ? [] : ['--timeout', '20'])]
+    const invocation = [process.execPath, join(root, 'bin/gorilla.mjs'), ...args, '--json', ...(args.includes('--timeout') ? [] : ['--timeout', '20'])]
     const child = spawn(invocation[0], invocation.slice(1), { cwd: temporary, env, stdio: ['ignore', 'pipe', 'pipe'], detached: true })
     let stdout = '', stderr = ''
     child.stdout.on('data', chunk => { stdout += chunk })

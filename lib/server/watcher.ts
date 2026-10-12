@@ -635,7 +635,7 @@ export async function openSyncSession(wallets: WalletInfo[], chains: Chain[], ti
       const selected = wallets.filter((wallet) => wallet.accounts[CHAINS[chain].family])
       if (!selected.length) continue
       const sources = config.sources(chain, settings)
-      if (!sources.electrum.length) throw new Error(`No Electrum server configured for ${CHAINS[chain].label}: use gorila config set --chain ${chain} --electrum URL`)
+      if (!sources.electrum.length) throw new Error(`No Electrum server configured for ${CHAINS[chain].label}: use gorilla config set --chain ${chain} --electrum URL`)
       const client = new ChainClient(chain, sources.electrum, sources.mempool)
       clients.set(chain, client)
       for (const wallet of selected) client.syncs.set(wallet.id, new WalletSync(wallet, client))

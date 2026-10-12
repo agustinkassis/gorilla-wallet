@@ -34,7 +34,7 @@ export function positiveInteger(value: string | undefined, name: string) {
   return n
 }
 export function selectWallet(wallets: WalletInfo[], selector?: string) {
-  if (!wallets.length) throw new CliError("No wallets: use gorila wallet create or import")
+  if (!wallets.length) throw new CliError("No wallets: use gorilla wallet create or import")
   if (!selector) {
     if (wallets.length !== 1) throw new CliError("Multiple wallets: specify --wallet ID_OR_NAME")
     return wallets[0]
