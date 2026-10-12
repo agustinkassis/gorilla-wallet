@@ -53,6 +53,7 @@ gorila wallet create --name ahorro                 # 24 palabras por defecto
 gorila wallet create --name gastos --words 12
 gorila wallet import --name recuperada             # prompt oculto para las palabras
 gorila wallet import --name recuperada --seed-file ./seed.txt
+gorila wallet password --wallet ahorro             # agregar o cambiar contraseña
 gorila wallet export-seed --wallet ahorro
 gorila wallet export-seed --wallet ahorro --include-passphrase
 gorila wallet descriptor --wallet ahorro
@@ -67,6 +68,37 @@ oculta y puede dejarse vacía. En automatización, omitirla crea una wallet sin
 contraseña. `--password-file FILE` permite suministrarla explícitamente; las
 contraseñas no vacías necesitan al menos 8 caracteres. Exportar o firmar una wallet
 cifrada exige la contraseña, mediante prompt oculto o archivo.
+
+### Agregar o cambiar la contraseña
+
+`gorila wallet password --wallet ahorro` cifra una wallet existente o cambia su
+contraseña sin reimportarla. Pide la contraseña actual si ya está cifrada y la
+nueva dos veces, con entrada oculta. La nueva debe tener al menos 8 caracteres;
+no se puede dejar vacía para quitar el cifrado. No necesita conexión a la red.
+
+Para automatización, usar archivos de secretos:
+
+```sh
+# Agregar contraseña a una wallet sin cifrar
+gorila wallet password --wallet ahorro --new-password-file ./nueva.txt
+# Cambiar la contraseña de una wallet cifrada
+gorila wallet password --wallet ahorro --password-file ./actual.txt --new-password-file ./nueva.txt
+```
+
+Protegé los archivos con permisos `600`. El comando conserva el ID, las claves,
+las direcciones, los labels, el historial, los cursores y las reglas forward. Solo
+admite wallets de software, no watch-only ni la wallet de `.env`. La passphrase
+BIP39 no cambia. Una contraseña incorrecta o un cambio concurrente no sobrescribe
+el cifrado existente. La respuesta solo incluye `walletId` y `needsPassword`.
+
+Los forward conservan sus archivos de contraseña: si agregás o cambiás la
+contraseña, sus ejecuciones necesitan un `--password-file` con la contraseña
+vigente. No se actualizan archivos de secretos ni entradas de cron automáticamente.
+Las copias anteriores de la base siguen teniendo el cifrado anterior (o la seed
+sin cifrar); este cambio no las protege retroactivamente ni garantiza el borrado
+seguro de datos anteriores en las páginas de SQLite o su WAL.
+
+### Passphrase y exportación
 
 La passphrase BIP39 deriva otra wallet y es distinta de la contraseña de cifrado.
 `--passphrase` la pide mediante prompt oculto; `--passphrase-file FILE` la lee de

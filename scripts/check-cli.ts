@@ -130,6 +130,25 @@ async function main() {
     assert.match((await invoke(["wallet", "export-seed", "--wallet", created.wallet.id, "--password-file", wrongFile], false)).error, /password/i)
     const created12 = (await invoke(["wallet", "create", "--name", "generated12", "--words", "12"])).result
     assert.equal(created12.mnemonic.split(" ").length, 12)
+    const passwordCommand = ["wallet", "password", "--wallet", created12.wallet.id]
+    const beforePasswordDescriptor = (await invoke(["wallet", "descriptor", "--wallet", created12.wallet.id])).result
+    assert.match((await invoke(passwordCommand, false)).error, /terminal or an explicit secret file/)
+    const encrypted = (await invoke([...passwordCommand, "--new-password-file", passwordFile])).result
+    assert.equal(encrypted.walletId, created12.wallet.id)
+    assert.equal(encrypted.needsPassword, true)
+    assert.equal((await invoke(["wallet", "export-seed", "--wallet", created12.wallet.id, "--password-file", passwordFile])).result.mnemonic, created12.mnemonic)
+    assert.match((await invoke([...passwordCommand, "--new-password-file", wrongFile], false)).error, /terminal or an explicit secret file/)
+    assert.match((await invoke([...passwordCommand, "--password-file", wrongFile, "--new-password-file", passwordFile], false)).error, /Wrong.*password/)
+    const shortFile = join(temporary, "short-password.txt")
+    await writeFile(shortFile, "short", { mode: 0o600 })
+    assert.match((await invoke([...passwordCommand, "--password-file", passwordFile, "--new-password-file", shortFile], false)).error, /8 characters/)
+    const rotated = await invoke([...passwordCommand, "--password-file", passwordFile, "--new-password-file", wrongFile])
+    assert.doesNotMatch(JSON.stringify(rotated.result) + rotated.stderr, /password123|wrong-password|abandon/)
+    assert.match((await invoke(["wallet", "export-seed", "--wallet", created12.wallet.id, "--password-file", passwordFile], false)).error, /Wrong.*password/)
+    assert.equal((await invoke(["wallet", "export-seed", "--wallet", created12.wallet.id, "--password-file", wrongFile])).result.mnemonic, created12.mnemonic)
+    assert.deepEqual((await invoke(["wallet", "descriptor", "--wallet", created12.wallet.id])).result, beforePasswordDescriptor)
+    assert.equal((await invoke(["wallet", "list"])).result.wallets.find((w: { id: string }) => w.id === created12.wallet.id).needsPassword, true)
+    console.log("PASS CLI wallet password: encrypt/decrypt and rotate a generated test wallet without exposing secrets or changing descriptors")
     const imported = (await invoke(["wallet", "import", "--name", "fixture", "--seed-file", "seed.txt"])).result.wallet
     assert.equal((await invoke(["wallet", "list"])).result.wallets.length, 3)
     assert.equal((await invoke(["wallet", "export-seed", "--wallet", "fixture"])).result.mnemonic, mnemonic)

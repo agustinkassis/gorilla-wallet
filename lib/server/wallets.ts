@@ -217,6 +217,23 @@ export async function renameWallet(id: unknown, name: unknown) {
   changed()
 }
 
+/** Re-encrypt the existing recovery material; accounts, labels and cursors stay on the same wallet. */
+export async function changeWalletPassword(id: unknown, password: unknown, newPassword: unknown) {
+  const wallet = typeof id === "string" ? await db.wallet.findUnique({ where: { id } }) : null
+  if (!wallet) throw new WalletError("Unknown wallet")
+  if (wallet.kind !== "seed") throw new WalletError("Only software wallets have a wallet password")
+  if (!wallet.encSeed) throw new WalletError("Wallet has no recovery words")
+  if (typeof newPassword !== "string" || newPassword.length < 8) throw new WalletError("New wallet password must be at least 8 characters")
+  if (typeof password !== "string") throw new WalletError("Current wallet password must be text")
+  if (isLocked(wallet.encSeed) && !password) throw new WalletError("Enter the current wallet password")
+  const plaintext = await unseal(wallet.encSeed, password)
+  const encSeed = await seal(plaintext, newPassword)
+  // scrypt yields: a concurrent rotation/deletion must not be overwritten with stale credentials.
+  const updated = await db.wallet.updateMany({ where: { id: wallet.id, kind: "seed", encSeed: wallet.encSeed }, data: { encSeed } })
+  if (!updated.count) throw new WalletError("Wallet changed while updating its password; retry with the current password")
+  changed()
+}
+
 /** Remove a wallet and everything cached for it. The env wallet is managed by .env. */
 export async function deleteWallet(id: unknown) {
   const w = await getWallet(id)

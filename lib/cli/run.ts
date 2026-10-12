@@ -6,7 +6,7 @@ import { secret, confirm } from "@/lib/cli/input"
 import { config } from "@/lib/server/config"
 import { db } from "@/lib/server/db"
 import { getSettings, parseSettings, saveSettings } from "@/lib/server/settings"
-import { createSeedWallet, exportSeed, exportDescriptors, listWallets, unlockAccounts } from "@/lib/server/wallets"
+import { changeWalletPassword, createSeedWallet, exportSeed, exportDescriptors, listWallets, unlockAccounts } from "@/lib/server/wallets"
 import { receiveAddress } from "@/lib/server/receive"
 import { setLabel } from "@/lib/server/labels"
 import { openSyncSession } from "@/lib/server/watcher"
@@ -22,6 +22,7 @@ export const HELP = `gorila - Bitcoin (BTC), Blake2b (XBT) and local regtest, am
 wallet list
 wallet create --name NAME [--words 12|24] [--password-file FILE] [--passphrase-file FILE]
 wallet import --name NAME [--seed-file FILE] [--password-file FILE] [--passphrase-file FILE]
+wallet password [--password-file FILE] [--new-password-file FILE]
 wallet export-seed [--include-passphrase] [--password-file FILE]
 wallet descriptor [--chain btc|xbt|regtest]
 receive [--chain btc|xbt|regtest] [--next] [--label TEXT]
@@ -50,6 +51,7 @@ const commandOptions: Record<string, readonly string[]> = {
   "wallet list": [],
   "wallet create": ["name", "words", "password-file", "passphrase-file", "passphrase"],
   "wallet import": ["name", "seed-file", "password-file", "passphrase-file", "passphrase"],
+  "wallet password": ["password-file", "new-password-file"],
   "wallet export-seed": ["password-file", "include-passphrase"],
   "wallet descriptor": ["chain", "password-file"],
   receive: ["label", "next", "chain", "password-file"], addresses: ["chain", "password-file"], "address label": ["chain", "password-file"],
@@ -155,6 +157,15 @@ export async function runCli(argv: readonly string[]) {
   if (command === "wallet list") return { wallets: wallets.map(walletResult) }
   if (command === "balance" && args.flags.has("all-wallets") && args.value("wallet")) throw new CliError("Use --all-wallets or --wallet")
   const selected = command === "balance" && args.flags.has("all-wallets") ? wallets : command === "tx-status" && !wallets.length ? [] : [selectWallet(wallets, args.value("wallet"))]
+  if (command === "wallet password") {
+    const wallet = selected[0]
+    if (wallet.kind !== "seed") throw new CliError("Only software wallets have a wallet password")
+    const password = wallet.needsPassword || args.value("password-file") ? await secret(args.value("password-file"), "Current wallet password") : ""
+    const newPassword = await secret(args.value("new-password-file"), "New wallet password")
+    if (!args.value("new-password-file") && newPassword !== await secret(undefined, "Repeat new wallet password")) throw new CliError("Passwords don't match")
+    await changeWalletPassword(wallet.id, password, newPassword)
+    return { walletId: wallet.id, needsPassword: true }
+  }
   let chains: Chain[] = ["btc", "xbt"]
   if (command === "balance") {
     const requested = args.value("chain") ?? "all"
