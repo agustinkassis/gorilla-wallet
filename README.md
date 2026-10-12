@@ -10,7 +10,7 @@ one of those Nostr keys on every API call.
 
 ## Download
 
-Desktop builds are on the [Releases](https://github.com/agustinkassis/gorila-wallet/releases) page:
+Desktop builds are on the [Releases](https://github.com/agustinkassis/gorilla-wallet/releases) page:
 
 | System | File |
 |---|---|
@@ -29,8 +29,8 @@ Requires [git](https://git-scm.com), **Node 24** (see `.nvmrc`; [nvm](https://gi
 and [pnpm](https://pnpm.io) (`corepack enable` sets it up).
 
 ```bash
-git clone https://github.com/agustinkassis/gorila-wallet.git
-cd gorila-wallet
+git clone https://github.com/agustinkassis/gorilla-wallet.git
+cd gorilla-wallet
 nvm use               # Node 24
 pnpm install          # also generates the Prisma client
 pnpm dev              # applies migrations, starts on http://localhost:3000
@@ -45,7 +45,7 @@ other machines, set `ALLOWED_PUBKEYS` and run `pnpm db:migrate && pnpm next star
 
 ## Wallets
 
-For local terminal use without starting Next.js, install `gorila` with
+For local terminal use without starting Next.js, install `gorilla` with
 `pnpm link --global`. See [CLI installation, commands and examples](docs/CLI.md).
 
 Switch wallets from the top of the sidebar; add more with **Add wallet** (Sparrow-style):
@@ -180,11 +180,11 @@ They are already set; this is how to set them up again (new certificate, renewed
 5. **Add the secrets**:
 
    ```bash
-   base64 -i DeveloperID.p12 | gh secret set APPLE_CERTIFICATE --repo agustinkassis/gorila-wallet
-   gh secret set APPLE_CERTIFICATE_PASSWORD --repo agustinkassis/gorila-wallet   # prompts for it
-   gh secret set APPLE_API_KEY_ID --repo agustinkassis/gorila-wallet --body "<Key ID>"
-   pbpaste | tr -d '[:space:]"' | gh secret set APPLE_API_ISSUER --repo agustinkassis/gorila-wallet   # Issuer ID copied
-   gh secret set APPLE_API_KEY_P8 --repo agustinkassis/gorila-wallet < AuthKey_<KeyID>.p8
+   base64 -i DeveloperID.p12 | gh secret set APPLE_CERTIFICATE --repo agustinkassis/gorilla-wallet
+   gh secret set APPLE_CERTIFICATE_PASSWORD --repo agustinkassis/gorilla-wallet   # prompts for it
+   gh secret set APPLE_API_KEY_ID --repo agustinkassis/gorilla-wallet --body "<Key ID>"
+   pbpaste | tr -d '[:space:]"' | gh secret set APPLE_API_ISSUER --repo agustinkassis/gorilla-wallet   # Issuer ID copied
+   gh secret set APPLE_API_KEY_P8 --repo agustinkassis/gorilla-wallet < AuthKey_<KeyID>.p8
    ```
 
 6. **Check** with a run from Actions → Desktop → Run workflow: the macOS jobs import the certificate into a temporary
@@ -205,13 +205,13 @@ Every release ships the same installers: macOS (arm64, x64), Windows (x64, arm64
    git tag v0.1.1 && git push origin v0.1.1
    ```
 
-3. Wait for [Actions → Desktop](https://github.com/agustinkassis/gorila-wallet/actions/workflows/desktop.yml) (about 15
+3. Wait for [Actions → Desktop](https://github.com/agustinkassis/gorilla-wallet/actions/workflows/desktop.yml) (about 15
    minutes). On a tag the workflow fails rather than ship something incomplete: the tag must equal `v` + the
    `package.json` version, the macOS apps must be Developer ID signed, notarized and accepted by Gatekeeper, and the
    draft release is only created when all six builds succeed. A flaky failure: Re-run failed jobs (the release job
    replaces the files of an existing draft). A failure that needs a code fix: delete the tag
    (`git push --delete origin v0.1.1 && git tag -d v0.1.1`), fix on `main` and tag again.
-4. Open the draft on [Releases](https://github.com/agustinkassis/gorila-wallet/releases), review the generated notes
+4. Open the draft on [Releases](https://github.com/agustinkassis/gorilla-wallet/releases), review the generated notes
    and files (10: two `.dmg`, two `-setup.exe`, and an AppImage, `.deb` and `.rpm` per Linux arch), and **Publish
    release**.
 

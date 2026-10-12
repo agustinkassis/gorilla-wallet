@@ -1,33 +1,33 @@
-# CLI local `gorila`
+# CLI local `gorilla`
 
 La CLI funciona con Node 24 y las dependencias del checkout, sin iniciar Next.js.
 Comparte wallets, seeds, labels, fuentes y SQLite con la web. No usa BDK ni RPC.
 
 ## Instalación
 
-Desde el checkout de `gorila-wallet`:
+Desde el checkout de `gorilla-wallet`:
 
 ```sh
 nvm use
 corepack enable
 pnpm install
 pnpm link --global
-gorila --help
+gorilla --help
 ```
 
 Si pnpm todavía no tiene directorio global, ejecutar `pnpm setup` y abrir una
-terminal nueva. También se puede ejecutar `node bin/gorila.mjs` desde el checkout.
+terminal nueva. También se puede ejecutar `node bin/gorilla.mjs` desde el checkout.
 El enlace necesita conservar el checkout y sus dependencias. No publica el paquete.
 
 El launcher encuentra el proyecto mediante su propia ruta, carga los archivos
 `.env` con el mismo cargador de Next.js y aplica las migraciones aditivas antes de
 ejecutar comandos. No inicia el servidor web. Las rutas relativas de SQLite se
 resuelven desde el proyecto; los archivos de secretos se resuelven desde el
-directorio donde se invocó `gorila`.
+directorio donde se invocó `gorilla`.
 
 `DATABASE_URL` conserva su prioridad sobre `.env`. Para compartir una base del
 desktop o de otro checkout, indicar la misma ruta absoluta, por ejemplo
-`DATABASE_URL=file:/ruta/wallet.db gorila wallet list`.
+`DATABASE_URL=file:/ruta/wallet.db gorilla wallet list`.
 
 ## Opciones comunes
 
@@ -48,14 +48,14 @@ direcciones `bcrt1` y cuenta `m/84'/1'/0'`.
 ## Wallets y secretos
 
 ```sh
-gorila wallet list
-gorila wallet create --name ahorro                 # 24 palabras por defecto
-gorila wallet create --name gastos --words 12
-gorila wallet import --name recuperada             # prompt oculto para las palabras
-gorila wallet import --name recuperada --seed-file ./seed.txt
-gorila wallet export-seed --wallet ahorro
-gorila wallet export-seed --wallet ahorro --include-passphrase
-gorila wallet descriptor --wallet ahorro
+gorilla wallet list
+gorilla wallet create --name ahorro                 # 24 palabras por defecto
+gorilla wallet create --name gastos --words 12
+gorilla wallet import --name recuperada             # prompt oculto para las palabras
+gorilla wallet import --name recuperada --seed-file ./seed.txt
+gorilla wallet export-seed --wallet ahorro
+gorilla wallet export-seed --wallet ahorro --include-passphrase
+gorilla wallet descriptor --wallet ahorro
 ```
 
 La creación devuelve las nuevas palabras para permitir su respaldo. La importación
@@ -82,11 +82,11 @@ fingerprint, ruta y xpub, para recepción y cambio; no contienen claves privadas
 ## Direcciones y labels
 
 ```sh
-gorila receive --wallet ahorro --label "factura 123"
-gorila receive --wallet ahorro
-gorila receive --wallet ahorro --next
-gorila addresses --wallet ahorro
-gorila address label bc1q... "cliente" --wallet ahorro
+gorilla receive --wallet ahorro --label "factura 123"
+gorilla receive --wallet ahorro
+gorilla receive --wallet ahorro --next
+gorilla addresses --wallet ahorro
+gorilla address label bc1q... "cliente" --wallet ahorro
 ```
 
 `receive` mantiene un cursor persistente por wallet y familia. Repite la dirección
@@ -105,10 +105,10 @@ para descubrirla.
 ## Balances, historial y estado
 
 ```sh
-gorila balance --wallet ahorro --chain all
-gorila balance --chain btc --all-wallets --json
-gorila transactions --wallet ahorro --chain xbt
-gorila tx-status TXID --wallet ahorro --chain btc
+gorilla balance --wallet ahorro --chain all
+gorilla balance --chain btc --all-wallets --json
+gorilla transactions --wallet ahorro --chain xbt
+gorilla tx-status TXID --wallet ahorro --chain btc
 ```
 
 Los balances muestran confirmado, pendiente y total en satoshis por wallet y
@@ -128,12 +128,12 @@ externo.
 ## Fuentes compartidas
 
 ```sh
-gorila config show
-gorila config set --chain btc \
+gorilla config show
+gorilla config set --chain btc \
   --electrum ssl://electrum.example.org:50002 \
   --electrum tcp://fulcrum.example.org:50001 \
   --mempool https://mempool.example.org
-gorila config set --chain xbt \
+gorilla config set --chain xbt \
   --electrum ssl://blake.example.org:50002 \
   --mempool https://blake-explorer.example.org
 ```
@@ -149,9 +149,9 @@ Recargar la web inicia una sesión que lee los cambios realizados por otro proce
 ## Enviar
 
 ```sh
-gorila send --wallet ahorro --chain btc --to bc1q... --amount-sats 15000 \
+gorilla send --wallet ahorro --chain btc --to bc1q... --amount-sats 15000 \
   --message "factura 123" --fee-rate 2
-gorila send --wallet ahorro --chain xbt --to bc1q... --amount-sats 15000 \
+gorilla send --wallet ahorro --chain xbt --to bc1q... --amount-sats 15000 \
   --fee-rate 2 --password-file ./password.txt --yes --json
 ```
 
@@ -185,14 +185,14 @@ Configurá un servidor Electrum y una API compatible con mempool para tu nodo:
 
 ```sh
 export DATABASE_URL=file:./data/regtest.db
-gorila config set --chain regtest \
+gorilla config set --chain regtest \
   --electrum tcp://127.0.0.1:50001 \
   --mempool http://127.0.0.1:3000
-gorila wallet create --name prueba
-gorila receive --wallet prueba --chain regtest
-gorila wallet descriptor --wallet prueba --chain regtest
-gorila balance --wallet prueba --chain regtest
-gorila transactions --wallet prueba --chain regtest
+gorilla wallet create --name prueba
+gorilla receive --wallet prueba --chain regtest
+gorilla wallet descriptor --wallet prueba --chain regtest
+gorilla balance --wallet prueba --chain regtest
+gorilla transactions --wallet prueba --chain regtest
 ```
 
 También se pueden indicar las fuentes mediante `REGTEST_ELECTRUM` y
@@ -203,9 +203,9 @@ necesita un proxy que lo adapte.
 Tras financiar y confirmar la dirección desde tu nodo:
 
 ```sh
-gorila send --wallet prueba --chain regtest --to bcrt1... \
+gorilla send --wallet prueba --chain regtest --to bcrt1... \
   --amount-sats 10000 --fee-rate 2 --message "prueba local"
-gorila tx-status TXID --wallet prueba --chain regtest
+gorilla tx-status TXID --wallet prueba --chain regtest
 ```
 
 La suite automatizada prepara su propio nodo, indexador y base temporal:

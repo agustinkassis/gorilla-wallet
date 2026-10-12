@@ -10,7 +10,7 @@ async function main() {
     else if ("help" in result) console.log(result.help)
     else console.log(formatText(result))
   } catch (error) {
-    console.error(`gorila: ${error instanceof Error ? error.message : String(error)}`)
+    console.error(`gorilla: ${error instanceof Error ? error.message : String(error)}`)
     process.exitCode = 1
   } finally { await db.$disconnect() }
 }

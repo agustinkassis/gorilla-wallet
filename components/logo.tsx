@@ -1,4 +1,4 @@
-/** The official Gorila Wallet gorilla (off-white with red details), without its red tile. Sized by className. */
+/** The official Gorilla Wallet gorilla (off-white with red details), without its red tile. Sized by className. */
 export function GorillaLogo({ className }: { className?: string }) {
   return (
     <svg viewBox="472 481 1104 1104" className={className} aria-hidden="true">

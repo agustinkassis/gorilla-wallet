@@ -5,7 +5,7 @@ import { StringDecoder } from "node:string_decoder"
 import { CliError } from "@/lib/cli/args"
 
 export async function secret(file: string | undefined, prompt: string, required = true): Promise<string> {
-  if (file) return (await readFile(resolve(process.env.GORILA_CALLER_CWD ?? process.cwd(), file), "utf8")).replace(/\r?\n$/, "")
+  if (file) return (await readFile(resolve(process.env.GORILLA_CALLER_CWD ?? process.cwd(), file), "utf8")).replace(/\r?\n$/, "")
   if (!process.stdin.isTTY || !process.stderr.isTTY) {
     if (!required) return ""
     throw new CliError(`${prompt}: a terminal or an explicit secret file is required`)

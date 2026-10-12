@@ -16,7 +16,7 @@ import { deriveAddress, type WalletInfo, type Snapshot } from "@/lib/wallet"
 import { CHAINS, familyOf, syncedChains, type Chain } from "@/lib/chains"
 import { INPUT_VSIZE, buildPsbt, feeAt, planTx, type Coin } from "@/lib/tx"
 
-export const HELP = `gorila - Bitcoin (BTC), Blake2b (XBT) and local regtest, amounts in satoshis
+export const HELP = `gorilla - Bitcoin (BTC), Blake2b (XBT) and local regtest, amounts in satoshis
 
 wallet list
 wallet create --name NAME [--words 12|24] [--password-file FILE] [--passphrase-file FILE]

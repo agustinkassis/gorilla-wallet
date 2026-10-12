@@ -14,7 +14,7 @@ import { DEFAULT_SETTINGS, addressScript, displayXpub, scriptHash } from "../lib
 
 async function main() {
   assert.ok(process.env.DATABASE_URL?.endsWith("regtest-core-check.db"), "Use isolated regtest-core-check.db")
-  const temporary = await mkdtemp(join(tmpdir(), "gorila-regtest-core-"))
+  const temporary = await mkdtemp(join(tmpdir(), "gorilla-regtest-core-"))
   const ids: string[] = []
   try {
     // Given the built-in regtest registry, when resolving its sources and policy, then no public chain is selected.

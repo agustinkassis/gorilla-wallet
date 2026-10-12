@@ -9,12 +9,12 @@ const root = resolve(dirname(realpathSync(fileURLToPath(import.meta.url))), '..'
 const localRequire = createRequire(resolve(root, 'package.json'))
 const caller = process.cwd()
 if (Number(process.versions.node.split('.')[0]) < 24) {
-  console.error('gorila requires Node 24 or newer')
+  console.error('gorilla requires Node 24 or newer')
   process.exit(1)
 }
 process.chdir(root)
 localRequire('@next/env').loadEnvConfig(root, false, { info() {}, error: (...args) => console.error(...args) })
-process.env.GORILA_CALLER_CWD = caller
+process.env.GORILLA_CALLER_CWD = caller
 const args = process.argv.slice(2)
 function needsMigration() {
   const url = process.env.DATABASE_URL ?? 'file:./data/wallet.db'
@@ -42,6 +42,6 @@ if (args.length && !args.includes('--help') && !args.includes('-h')) {
     process.exit(1)
   }
 }
-const child = spawnSync(process.execPath, [localRequire.resolve('tsx/cli'), '--conditions=react-server', '--tsconfig', resolve(root, 'tsconfig.json'), resolve(root, 'scripts/gorila.ts'), ...args], { cwd: root, env: process.env, stdio: 'inherit' })
+const child = spawnSync(process.execPath, [localRequire.resolve('tsx/cli'), '--conditions=react-server', '--tsconfig', resolve(root, 'tsconfig.json'), resolve(root, 'scripts/gorilla.ts'), ...args], { cwd: root, env: process.env, stdio: 'inherit' })
 if (child.error) console.error(child.error.message)
 process.exit(child.status ?? 1)

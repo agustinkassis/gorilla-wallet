@@ -3,7 +3,7 @@
   "version": "0.1.1",
   "private": true,
   "bin": {
-    "gorila": "bin/gorila.mjs"
+    "gorilla": "bin/gorilla.mjs"
   },
   "scripts": {
     "dev": "prisma migrate deploy && next dev -H 127.0.0.1",

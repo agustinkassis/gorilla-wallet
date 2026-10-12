@@ -15,8 +15,8 @@ import { parseArgs } from "@/lib/cli/args"
 import { parseTxHex } from "@/lib/tx"
 
 async function main() {
-  const temporary = await mkdtemp(join(tmpdir(), "gorila-cli-"))
-  const launcher = resolve("bin/gorila.mjs")
+  const temporary = await mkdtemp(join(tmpdir(), "gorilla-cli-"))
+  const launcher = resolve("bin/gorilla.mjs")
   const mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
   const account = HDKey.fromMasterSeed(mnemonicToSeedSync(mnemonic)).derive("m/84'/0'/0'")
   const address = deriveAddress(account.publicExtendedKey, 0, 0, "main").address
