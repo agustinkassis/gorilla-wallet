@@ -78,6 +78,14 @@ export function ModuleFrame({ module, view, minHeight = 120, className }: { modu
         case "ui.resize":
           setHeight(Math.min(Math.max(Math.ceil(Number(params.height) || 0), 40), 4000))
           return
+        case "ui.copy": {
+          // only the wallet's own addresses: a module can't swap in someone else's for the user to paste
+          const text = String(params.text ?? "")
+          if (!Object.values(w.snapshots).some((s) => s?.addresses.some((a) => a.address === text))) throw new Error("Modules can only copy this wallet's addresses")
+          await navigator.clipboard.writeText(text)
+          toast.success("Address copied")
+          return
+        }
         case "ui.toast":
           toast(module.name, { description: String(params.message ?? "").slice(0, 200) })
           return

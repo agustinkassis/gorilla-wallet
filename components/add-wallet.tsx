@@ -254,6 +254,13 @@ export function AddWalletFlow({ onDone, onCancel }: { onDone: (w: WalletInfo) =>
           <Button disabled={!verify.every((i) => checks[i] === genWords[i])} onClick={() => setCreateStep("secure")}>
             Continue
           </Button>
+          <button
+            type="button"
+            className="self-center text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+            onClick={() => setCreateStep("secure")}
+          >
+            I know what I&apos;m doing, skip this
+          </button>
         </>
       )}
 

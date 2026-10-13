@@ -46,11 +46,15 @@ const changed = () => listeners.forEach((l) => l())
 
 type Row = { id: string; name: string; kind: string; encSeed: string | null; passphrase: boolean }
 type Accounts = Partial<Record<Family, Account>>
+// A watch-only Bitcoin key can't derive its testnet account (m/84'/1'/0' is hardened), so testnets watch the same
+// keys, tb1-encoded. Never the other way: real coins would land on a testnet path other wallets don't scan.
+const mainKeyOnTestnets = (w: Row, accounts: Accounts) => w.kind === "watch" && !!accounts.main && !accounts.test
 const info = (w: Row, accounts: Accounts): WalletInfo => ({
   id: w.id,
   name: w.name,
   kind: w.kind as WalletKind,
-  accounts,
+  accounts: mainKeyOnTestnets(w, accounts) ? { ...accounts, test: accounts.main } : accounts,
+  ...(mainKeyOnTestnets(w, accounts) && { mainKeyOnTestnets: true }),
   watchOnly: w.kind === "watch",
   needsPassword: w.kind === "seed" && isLocked(w.encSeed!),
   passphrase: w.passphrase,

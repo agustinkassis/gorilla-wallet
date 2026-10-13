@@ -53,6 +53,8 @@ export const http = {
 
 export const ui = {
   toast: (message: string) => call<void>("ui.toast", { message }),
+  /** copies one of the wallet's own addresses (anything else is refused: no planting addresses in the clipboard) */
+  copy: (text: string) => call<void>("ui.copy", { text }),
 }
 
 /** Handshake: the module's config and the network, kept fresh (new blocks, fees). Sizes the frame to the content. */
