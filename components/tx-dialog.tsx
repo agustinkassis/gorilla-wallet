@@ -28,7 +28,7 @@ import { copy, shorten } from "@/components/site-header"
 import { useUnit } from "@/components/units"
 import { useWallet } from "@/components/wallet-provider"
 import { api, download } from "@/lib/api"
-import { INPUT_VSIZE, buildPsbt, importSigned, type Coin, type TxPlan } from "@/lib/tx"
+import { INPUT_VSIZE, buildPsbt, importSigned, sentBy, type Coin, type TxPlan } from "@/lib/tx"
 import { CHAINS, amountText, type Chain, type Snapshot } from "@/lib/wallet"
 import { cn } from "@/lib/utils"
 
@@ -71,8 +71,9 @@ export function useTxFlow(chain: Chain, onSent?: (txid: string) => void) {
     busy,
     review: (plan: TxPlan) =>
       run("Couldn't build the transaction", async () => {
-        // full parent txs (nonWitnessUtxo) for hardware/external signers; optional
-        const parents = await api<Record<string, string>>("/api/rawtx", { chain, txids: [...new Set(plan.inputs.map((c) => c.txid))] }).catch(() => ({}))
+        // full parent txs (nonWitnessUtxo): optional for hardware/external signers, required for a sidechain's treasury
+        const txids = [...new Set([...plan.inputs.map((c) => c.txid), ...(plan.deposit?.ctip ? [plan.deposit.ctip.txid] : [])])]
+        const parents = await api<Record<string, string>>("/api/rawtx", { chain, txids }).catch(() => ({}))
         const tx = buildPsbt(plan, {
           chain,
           xpub: wallet.xpub!,
@@ -152,11 +153,11 @@ export function TxDialog({ flow, chain, doneLabel = "New payment", onClose }: { 
           </DialogTitle>
           <DialogDescription>
             {step.name === "review" &&
-              `${step.plan.inputs.length} input${step.plan.inputs.length === 1 ? "" : "s"} · ${amountText(
-                step.plan.outputs.filter((o) => o.kind === "recipient").reduce((s, o) => s + o.amount, 0),
+              `${step.plan.inputs.length} input${step.plan.inputs.length === 1 ? "" : "s"}${step.plan.deposit ? " + the sidechain treasury" : ""} · ${amountText(
+                sentBy(step.plan),
                 chain,
                 unit,
-              )} · fee ${step.plan.fee.toLocaleString()} sats (${(step.plan.fee / step.plan.vsize).toFixed(1)} sat/vB). ${watchOnly ? "Watch-only wallet: sign it on the device that holds the keys, then bring it back below." : "Scan with a signing wallet, or let this wallet's backend sign it."}`}
+              )}${step.plan.deposit ? ` to sidechain ${step.plan.deposit.slot}` : ""} · fee ${step.plan.fee.toLocaleString()} sats (${(step.plan.fee / step.plan.vsize).toFixed(1)} sat/vB). ${watchOnly ? "Watch-only wallet: sign it on the device that holds the keys, then bring it back below." : "Scan with a signing wallet, or let this wallet's backend sign it."}`}
             {step.name === "signed" &&
               `${step.signed.vsize} vB · fee ${step.signed.fee.toLocaleString()} sats · txid ${shorten(step.signed.txid)}. Nothing is sent until you broadcast.`}
             {step.name === "sent" && "The network accepted the transaction. It will confirm in an upcoming block."}

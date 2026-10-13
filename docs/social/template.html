@@ -1,0 +1,218 @@
+<!doctype html>
+<!-- Social image for each release, rendered by scripts/social.mjs (see docs/SOCIAL.md). One template, two layouts:
+     landscape (1200×675: X, LinkedIn, Facebook, the release) and square (1080×1080: Instagram). Edit FEATURES below. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=Geist+Mono:wght@500&display=block"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --red: #cc0404; /* the cover's background */
+        --ink: #120607;
+        --paper: #f6f1ea;
+        --muted: rgba(246, 241, 234, 0.72);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+      }
+      body {
+        position: relative;
+        background: var(--ink);
+        color: var(--paper);
+        font-family: "Bricolage Grotesque", system-ui, sans-serif;
+      }
+      .art {
+        position: absolute;
+        background: var(--red) url("../../components/splash.webp") no-repeat;
+      }
+      .panel {
+        position: absolute;
+        display: flex;
+        flex-direction: column;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+      }
+      .brand img {
+        width: 64px;
+        height: 64px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 52px;
+        font-weight: 800;
+        line-height: 1;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+      }
+      .tagline {
+        margin: 0;
+        font-size: 24px;
+        font-weight: 500;
+        line-height: 1.25;
+        color: var(--muted);
+      }
+      .head {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+      }
+      .version {
+        padding: 10px 18px;
+        border-radius: 999px;
+        background: var(--red);
+        color: #fff;
+        font: 500 34px/1 "Geist Mono", ui-monospace, monospace;
+        letter-spacing: 0.04em;
+      }
+      ul {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        display: grid;
+        gap: 16px;
+      }
+      li {
+        position: relative;
+        padding-left: 26px;
+        font-size: 23px;
+        font-weight: 500;
+        line-height: 1.25;
+      }
+      li::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 0.38em;
+        width: 12px;
+        height: 12px;
+        border-radius: 3px;
+        background: var(--red);
+      }
+      li b {
+        font-weight: 800;
+      }
+      .url {
+        font: 500 16px/1 "Geist Mono", ui-monospace, monospace;
+        color: var(--muted);
+      }
+
+      /* Landscape: features on the left, the gorilla (below the cover's lettering) on the right */
+      @media (min-aspect-ratio: 4/3) {
+        .art {
+          top: 0;
+          right: 0;
+          bottom: 0;
+          width: 56%;
+          background-size: 1536px 1024px;
+          background-position: -300px -250px;
+        }
+        .art::before {
+          content: "";
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(90deg, var(--ink) 0%, rgba(18, 6, 7, 0.6) 18%, transparent 45%);
+        }
+        .panel {
+          top: 56px;
+          bottom: 48px;
+          left: 64px;
+          width: 600px;
+          gap: 26px;
+        }
+        ul {
+          grid-template-columns: 1fr;
+        }
+        .url {
+          margin-top: auto;
+        }
+      }
+
+      /* Square: the whole cover (with its lettering) on top, features below */
+      @media (max-aspect-ratio: 4/3) {
+        .art {
+          top: 0;
+          left: 0;
+          right: 0;
+          height: 64%;
+          background-size: 100% auto;
+          background-position: center top;
+        }
+        .art::after {
+          content: "";
+          position: absolute;
+          inset: 55% 0 0;
+          background: linear-gradient(180deg, transparent, var(--ink));
+        }
+        .brand {
+          display: none; /* the cover already says GORILLA WALLET */
+        }
+        .panel {
+          top: 60%;
+          left: 64px;
+          right: 64px;
+          bottom: 44px;
+          gap: 22px;
+        }
+        ul {
+          grid-template-columns: 1fr;
+          gap: 12px;
+        }
+        .url {
+          margin-top: auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="art"></div>
+    <div class="panel">
+      <div class="brand">
+        <img src="../../app/icon.svg" alt="" />
+        <h1>Gorilla Wallet</h1>
+      </div>
+      <div class="head">
+        <span class="version" id="version"></span>
+        <p class="tagline" id="tagline"></p>
+      </div>
+      <ul id="features"></ul>
+      <div class="url">github.com/agustinkassis/gorilla-wallet</div>
+    </div>
+    <script>
+      // ── Content: keep it to 6 short features (≈40 characters) so both layouts fit ──
+      const TAGLINE = "Self-hosted Bitcoin wallet"
+      const FEATURES = [
+        ["Bitcoin + Blake", " (XBT), testnets and Signet"],
+        ["Air-gapped signing", " with animated QR PSBTs"],
+        ["Coin control", ", labels and BIP-329"],
+        ["RBF & CPFP", " fee bumping"],
+        ["Replay", " transactions Bitcoin ↔ Blake"],
+        ["Signed desktop app", " for macOS, Windows, Linux"],
+      ]
+
+      // version comes from package.json through scripts/social.mjs (?v=0.2.0)
+      document.getElementById("version").textContent = "v" + (new URLSearchParams(location.search).get("v") ?? "0.0.0")
+      document.getElementById("tagline").textContent = TAGLINE
+      const list = document.getElementById("features")
+      for (const [bold, rest] of FEATURES) {
+        const li = document.createElement("li")
+        li.append(Object.assign(document.createElement("b"), { textContent: bold }), rest)
+        list.append(li)
+      }
+    </script>
+  </body>
+</html>

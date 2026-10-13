@@ -1,10 +1,12 @@
 // Transaction planning + PSBT building, shared by the browser (builds) and the server (re-validates).
-// All inputs are this wallet's P2WPKH coins. Chain differences come from lib/chains.ts (rules, sighash, addresses).
+// All inputs are this wallet's P2WPKH coins, plus a sidechain's treasury on a BIP300 deposit.
+// Chain differences come from lib/chains.ts (rules, sighash, addresses).
 import { HDKey } from "@scure/bip32"
 import { Address, OutScript, Script, SigHash, Transaction, bip32Path, p2pkh, p2wpkh } from "@scure/btc-signer"
 import { secp256k1 } from "@noble/curves/secp256k1.js"
 import { base64 } from "@scure/base"
-import { hexToBytes } from "@noble/hashes/utils.js"
+import { sha256 } from "@noble/hashes/sha2.js"
+import { bytesToHex, hexToBytes, utf8ToBytes } from "@noble/hashes/utils.js"
 import { SIGHASH_ALL_UNIFIED, SIGHASH_UNIFIED, unifiedSighash } from "@/lib/unified-sighash"
 import { CHAINS, REPLAY_LOCKTIME, dataCapPair, familyOf, minDataScript, networkOf, type Chain } from "@/lib/chains"
 
@@ -12,7 +14,11 @@ export type Coin = { txid: string; vout: number; value: number; address: string;
 /** An address, or a raw output script (module transactions). */
 export type Recipient = { address?: string; script?: Uint8Array; amount: number }
 export type PlannedOutput = { script: Uint8Array; amount: number; address?: string; kind: "recipient" | "change" | "data" }
-export type TxPlan = { inputs: Coin[]; outputs: PlannedOutput[]; fee: number; vsize: number }
+/** A sidechain's treasury UTXO (BIP300 CTIP): anyone-can-spend, holding everything deposited to it. */
+export type Ctip = { txid: string; vout: number; value: number }
+/** A BIP300 M5 deposit: the recipient output is the new treasury (old treasury + amount), then the address OP_RETURN. */
+export type Deposit = { slot: number; address: string; ctip: Ctip | null }
+export type TxPlan = { inputs: Coin[]; outputs: PlannedOutput[]; fee: number; vsize: number; deposit?: Deposit }
 /** Fee policy: total fee (sats) for a given vsize. */
 export type FeePolicy = (vsize: number) => number
 
@@ -44,12 +50,18 @@ export const cpfpFee =
 
 const varintLen = (n: number) => (n < 0xfd ? 1 : n <= 0xffff ? 3 : 5)
 
-/** vsize for `inputs` P2WPKH inputs and the given output scripts (signatures sized worst case). */
-export function estimateVsize(inputs: number, scripts: Uint8Array[]) {
+/**
+ * vsize for `inputs` P2WPKH inputs and the given output scripts (signatures sized worst case), plus `bare` inputs
+ * spent with an empty scriptSig and no witness (a BIP300 treasury: 41 bytes and its empty witness count).
+ */
+export function estimateVsize(inputs: number, scripts: Uint8Array[], bare = 0) {
   const outputs = scripts.reduce((s, sc) => s + 8 + varintLen(sc.length) + sc.length, 0)
-  const base = 4 + varintLen(inputs) + 41 * inputs + varintLen(scripts.length) + outputs + 4
-  return Math.ceil((base * 4 + 2 + 108 * inputs) / 4)
+  const base = 4 + varintLen(inputs + bare) + 41 * (inputs + bare) + varintLen(scripts.length) + outputs + 4
+  return Math.ceil((base * 4 + 2 + 108 * inputs + bare) / 4)
 }
+
+/** vsize from the serialization: scure's tx.vsize refuses inputs it can't finalize, like a treasury's empty scriptSig. */
+export const vsizeOf = (tx: Transaction) => Math.ceil((tx.toBytes(true, false).length * 3 + tx.toBytes(true, true).length) / 4)
 
 /** Core's dust threshold at the default 3 sat/vB dust relay fee. */
 export function dustLimit(script: Uint8Array) {
@@ -87,6 +99,54 @@ export function outputRuleError(chain: Chain, script: Uint8Array): string | null
   return null
 }
 
+/** BIP300 treasury script for sidechain `slot`: OP_DRIVECHAIN OP_PUSHBYTES_1 <slot> OP_TRUE. */
+export function drivechainScript(chain: Chain, slot: number) {
+  const dc = CHAINS[chain].drivechain
+  if (!dc) throw new PlanError(`${CHAINS[chain].label} has no sidechains`)
+  return Uint8Array.of(dc.opcode, 0x01, slot, 0x51)
+}
+
+/** The sidechain slot a treasury script locks to, or null for any other script. */
+export function drivechainSlot(chain: Chain, script: Uint8Array) {
+  const op = CHAINS[chain].drivechain?.opcode
+  return op !== undefined && script.length === 4 && script[0] === op && script[1] === 0x01 && script[3] === 0x51 ? script[2] : null
+}
+
+/**
+ * A sidechain deposit address, `s<slot>_<address>_<checksum>` (thunder, bitnames, bitassets, photon…): the checksum is
+ * the first 3 bytes of sha256("s<slot>_<address>_") in hex. The sidechain reads `<address>` from the M5 OP_RETURN and
+ * credits nobody when it's malformed, so only checksummed addresses are accepted.
+ */
+export function parseDepositAddress(text: string): { slot: number; address: string } {
+  const m = /^s(\d{1,3})_(.+)_([0-9a-f]{6})$/i.exec(text.trim())
+  if (!m || Number(m[1]) > 255) throw new PlanError("Enter a sidechain deposit address (s<slot>_<address>_<checksum>)")
+  if (bytesToHex(sha256(utf8ToBytes(`s${m[1]}_${m[2]}_`)).slice(0, 3)) !== m[3].toLowerCase()) throw new PlanError("Deposit address checksum doesn't match: check it for typos")
+  return { slot: Number(m[1]), address: m[2] }
+}
+
+/** BIP300 M5 output pair: the address OP_RETURN that must directly follow the new treasury output. */
+export const depositDataScript = (address: string) => Script.encode(["RETURN", utf8ToBytes(address)])
+
+/**
+ * The M5 deposit in `tx`, or null: its single treasury output must be directly followed by a zero-value OP_RETURN
+ * pushing the sidechain address (the enforcer ignores a deposit without it, and the coins are lost).
+ */
+export function depositOf(chain: Chain, tx: Transaction) {
+  const outs = Array.from({ length: tx.outputsLength }, (_, i) => tx.getOutput(i))
+  const at = outs.flatMap((o, i) => (o.script && drivechainSlot(chain, o.script) !== null ? [i] : []))
+  if (!at.length) return null
+  if (at.length > 1) throw new PlanError("Only one sidechain deposit per transaction")
+  const [vout] = at
+  const next = outs[vout + 1]
+  const push = next?.script && isDataScript(next.script) ? Script.decode(next.script) : []
+  if (next?.amount !== 0n || push.length !== 2 || !(push[1] instanceof Uint8Array) || !push[1].length)
+    throw new PlanError("A sidechain deposit must be followed by an OP_RETURN with the sidechain address")
+  return { slot: drivechainSlot(chain, outs[vout].script!)!, vout, value: outs[vout].amount!, address: push[1] as Uint8Array }
+}
+
+/** What a plan pays out: recipients, minus the old treasury a deposit just carries over. */
+export const sentBy = (plan: TxPlan) => plan.outputs.filter((o) => o.kind === "recipient").reduce((s, o) => s + o.amount, 0) - (plan.deposit?.ctip?.value ?? 0)
+
 export function scriptFor(address: string, chain: Chain) {
   try {
     return OutScript.encode(Address(networkOf(familyOf(chain))).decode(address.trim()))
@@ -113,6 +173,8 @@ const sum = (coins: Coin[]) => coins.reduce((s, c) => s + c.value, 0)
  * `sendMax` sweeps everything selected (required, or all candidates) to the single recipient.
  * `guard`: replay guard for a pair with no marker to carry (eCash): spend one of `coins` (coins the pair lacks), adding
  * the smallest when the plan has none, so the pair rejects the whole transaction.
+ * `deposit`: BIP300 M5 to the single recipient, a sidechain deposit address; `ctip` is that sidechain's current treasury
+ * (null before its first deposit), spent here and carried over into the new one.
  */
 export function planTx(o: {
   chain: Chain
@@ -124,15 +186,20 @@ export function planTx(o: {
   changeAddress: string
   data?: Uint8Array
   guard?: { coins: Coin[]; pair: Chain }
+  deposit?: { ctip: Ctip | null }
 }): TxPlan {
   if (!o.recipients.length && !o.data) throw new PlanError("Add a recipient")
   if (o.data && (CHAINS[o.chain].maxDataScript === false || CHAINS[o.chain].noDataOutputs))
     throw new PlanError(`OP_RETURN outputs are not allowed on ${CHAINS[o.chain].label}`)
+  const dest = o.deposit ? parseDepositAddress(o.recipients[0]?.address ?? "") : null
+  if (dest && (o.recipients.length !== 1 || o.data)) throw new PlanError("A deposit goes to a single sidechain address")
+  const deposit: Deposit | undefined = dest ? { ...dest, ctip: o.deposit!.ctip } : undefined
   const recipients = o.recipients.map((r) => {
-    const script = r.script ?? scriptFor(r.address ?? "", o.chain)
+    const script = dest ? drivechainScript(o.chain, dest.slot) : (r.script ?? scriptFor(r.address ?? "", o.chain))
     return { ...r, script, address: r.address ?? addressFor(script, o.chain) }
   })
-  const dataScript = o.data ? opReturnScript(o.data, o.chain) : null
+  const dataScript = dest ? depositDataScript(dest.address) : o.data ? opReturnScript(o.data, o.chain) : null
+  const vsizeFor = (inputs: number, scripts: Uint8Array[]) => estimateVsize(inputs, scripts, deposit?.ctip ? 1 : 0)
   for (const s of [...recipients.map((r) => r.script), ...(dataScript ? [dataScript] : [])]) {
     const err = outputRuleError(o.chain, s)
     if (err) throw new PlanError(err)
@@ -154,6 +221,14 @@ export function planTx(o: {
       if (out.kind !== "data" && out.amount < dustLimit(out.script)) throw new PlanError(`Amount below the dust limit (${dustLimit(out.script)} sats)`)
   }
 
+  // deposit: the treasury input carries its value into the new treasury output (amounts above are just the deposit)
+  const finish = (plan: TxPlan): TxPlan => {
+    const ctip = deposit?.ctip
+    if (!deposit) return guard(plan)
+    const outputs = ctip ? plan.outputs.map((out) => (out.kind === "recipient" ? { ...out, amount: out.amount + ctip.value } : out)) : plan.outputs
+    return guard({ ...plan, outputs, deposit })
+  }
+
   // replay guard: no guarded coin in the plan → add the smallest one and plan again
   const guard = (plan: TxPlan): TxPlan => {
     if (!o.guard) return plan
@@ -168,11 +243,11 @@ export function planTx(o: {
     if (recipients.length !== 1) throw new PlanError("Send max works with a single recipient")
     const inputs = required.length ? required : pool
     if (!inputs.length) throw new PlanError("No spendable coins")
-    const vsize = estimateVsize(inputs.length, fixed)
+    const vsize = vsizeFor(inputs.length, fixed)
     const fee = o.fee(vsize)
     const plan = { inputs, outputs: outputs([sum(inputs) - fee], 0), fee, vsize }
     checkDust(plan.outputs)
-    return guard(plan)
+    return finish(plan)
   }
 
   const target = recipients.reduce((s, r) => {
@@ -184,10 +259,10 @@ export function planTx(o: {
 
   const tryCoins = (inputs: Coin[]): (TxPlan & { excess: number }) | null => {
     const total = sum(inputs)
-    const vNo = estimateVsize(inputs.length, fixed)
+    const vNo = vsizeFor(inputs.length, fixed)
     const feeNo = o.fee(vNo)
     if (total < target + feeNo) return null
-    const vCh = estimateVsize(inputs.length, [...fixed, changeScript])
+    const vCh = vsizeFor(inputs.length, [...fixed, changeScript])
     const feeCh = o.fee(vCh)
     const change = total - target - feeCh
     if (change >= dustLimit(changeScript) && total - target - feeNo > changeCost(vNo)) {
@@ -220,7 +295,7 @@ export function planTx(o: {
   if (!plan) throw new PlanError("Insufficient funds for amount + fee")
   const { excess: _excess, ...result } = plan
   void _excess
-  return guard(result)
+  return finish(result)
 }
 
 function shuffle<T>(list: T[]) {
@@ -241,6 +316,8 @@ export const hasReplayLockTime = (tx: Transaction) =>
 /**
  * Unsigned PSBT for a plan. Inputs declare SIGHASH_ALL, or ALL|UNIFIED (0x21) on SIGHASH_UNIFIED chains (Blake).
  * nLockTime = tip (anti-fee-sniping), or REPLAY_LOCKTIME on eCash; nSequence signals RBF, output order is randomized.
+ * A deposit spends the sidechain's treasury first (its parent from `parents`, empty scriptSig: nobody signs it) and
+ * keeps the M5 order: new treasury, address OP_RETURN, change.
  */
 export function buildPsbt(
   plan: TxPlan,
@@ -249,6 +326,12 @@ export function buildPsbt(
   const account = HDKey.fromExtendedKey(ctx.xpub)
   const sighashType = CHAINS[ctx.chain].unifiedSighash ? SIGHASH_ALL_UNIFIED : SigHash.ALL
   const tx = new Transaction({ version: 2, lockTime: CHAINS[ctx.chain].replayLockTime ? REPLAY_LOCKTIME : ctx.tipHeight, allowUnknownOutputs: true, allowUnknownInputs: true })
+  const ctip = plan.deposit?.ctip
+  if (ctip) {
+    const parent = ctx.parents?.[ctip.txid]
+    if (!parent) throw new PlanError("Couldn't load the sidechain treasury's transaction")
+    tx.addInput({ txid: ctip.txid, index: ctip.vout, sequence: RBF_SEQUENCE, nonWitnessUtxo: hexToBytes(parent) })
+  }
   for (const coin of plan.inputs) {
     const publicKey = account.deriveChild(coin.change).deriveChild(coin.index).publicKey!
     const parent = ctx.parents?.[coin.txid]
@@ -262,7 +345,7 @@ export function buildPsbt(
       sighashType,
     })
   }
-  for (const out of shuffle(plan.outputs)) tx.addOutput({ script: out.script, amount: BigInt(out.amount) })
+  for (const out of plan.deposit ? plan.outputs : shuffle(plan.outputs)) tx.addOutput({ script: out.script, amount: BigInt(out.amount) })
   return tx
 }
 
@@ -289,7 +372,8 @@ function decodeSigned(input: Uint8Array | string): Transaction {
  * Bring back a transaction signed elsewhere (hardware wallet, Sparrow, Knots…).
  * Finalizes P2WPKH inputs from partial signatures, then checks it is exactly the transaction we built
  * (same txid: same inputs, outputs, version, locktime) and that every signature is valid for this chain:
- * BIP143 SIGHASH_ALL, or SIGHASH_UNIFIED (0x21, required) on chains that use it (Blake).
+ * BIP143 SIGHASH_ALL, or SIGHASH_UNIFIED (0x21, required) on chains that use it (Blake). A deposit's treasury input
+ * stays unsigned (empty scriptSig and witness).
  */
 export function importSigned(chain: Chain, unsignedPsbt: Uint8Array, input: Uint8Array | string) {
   const expected = Transaction.fromPSBT(unsignedPsbt, { allowUnknownOutputs: true, allowUnknownInputs: true })
@@ -314,6 +398,11 @@ export function importSigned(chain: Chain, unsignedPsbt: Uint8Array, input: Uint
 
   for (let i = 0; i < tx.inputsLength; i++) {
     const inp = tx.getInput(i)
+    const treasury = expected.getInput(i).nonWitnessUtxo?.outputs[expected.getInput(i).index!]
+    if (!spent[i] && treasury && drivechainSlot(chain, treasury.script) !== null) {
+      if (inp.finalScriptWitness?.length) throw new PlanError(`Input ${i + 1} is the sidechain treasury: it takes no witness`)
+      continue // its empty scriptSig is part of the txid checked above
+    }
     let witness = inp.finalScriptWitness
     if (!witness?.length && inp.partialSig?.length) {
       const [pub, sig] = inp.partialSig[0]
@@ -336,5 +425,5 @@ export function importSigned(chain: Chain, unsignedPsbt: Uint8Array, input: Uint
     }
     if (!secp256k1.verify(sig.slice(0, -1), msg, pub, { prehash: false, format: "der" })) throw new PlanError(`Input ${i + 1} has an invalid signature`)
   }
-  return { hex: tx.hex, txid: tx.id, vsize: tx.vsize }
+  return { hex: tx.hex, txid: tx.id, vsize: vsizeOf(tx) }
 }

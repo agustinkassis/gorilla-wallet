@@ -8,6 +8,7 @@ import {
   AlertTriangleIcon,
   ArrowLeftIcon,
   FingerprintIcon,
+  LayersIcon,
   Loader2Icon,
   PenLineIcon,
   PlusIcon,
@@ -43,10 +44,13 @@ import {
   cpfpFee,
   feeAt,
   opReturnScript,
+  parseDepositAddress,
   parseTxHex,
   planTx,
   rbfFee,
+  sentBy,
   type Coin,
+  type Ctip,
   type FeePolicy,
   type TxPlan,
 } from "@/lib/tx"
@@ -73,7 +77,8 @@ const PRESETS: { key: FeePreset; label: string }[] = [
   { key: "economyFee", label: "Economy" },
 ]
 
-type Mode = { kind: "send" } | { kind: "bump"; txid: string } | { kind: "cpfp"; outpoint: string }
+type Mode = { kind: "send" } | { kind: "deposit" } | { kind: "bump"; txid: string } | { kind: "cpfp"; outpoint: string }
+type Sidechain = { slot: number; title: string; ctip: Ctip | null }
 
 const outpoint = (c: { txid: string; vout: number }) => `${c.txid}:${c.vout}`
 
@@ -89,14 +94,16 @@ function Send() {
   const params = useSearchParams()
   const router = useRouter()
   const wallet = useWallet()
+  // the selected network (navbar); its replay pairs only inform the replay guards
+  const chain = wallet.chain
+  const snap = wallet.snapshots[chain]
   const mode: Mode = params.get("bump")
     ? { kind: "bump", txid: params.get("bump")! }
     : params.get("cpfp")
       ? { kind: "cpfp", outpoint: params.get("cpfp")! }
-      : { kind: "send" }
-  // the selected network (navbar); its replay pairs only inform the replay guards
-  const chain = wallet.chain
-  const snap = wallet.snapshots[chain]
+      : params.get("deposit") && CHAINS[chain].drivechain
+        ? { kind: "deposit" }
+        : { kind: "send" }
   // transaction types: a plain payment, or one a module adds (its view runs sandboxed and proposes the tx)
   const types = mode.kind === "send" ? viewsFor(wallet.settings.modules, chain, "send") : []
   const [picked, setPicked] = useState("payment")
@@ -108,24 +115,33 @@ function Send() {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         {mode.kind === "send" ? (
-          types.length ? (
-            <div className="flex flex-wrap gap-1">
-              {[{ key: "payment", title: "Payment" }, ...types.map((t) => ({ key: `${t.module.id}:${t.view.id}`, title: t.view.title }))].map((t) => (
+          <div className="flex flex-wrap gap-1">
+            {types.length > 0 &&
+              [{ key: "payment", title: "Payment" }, ...types.map((t) => ({ key: `${t.module.id}:${t.view.id}`, title: t.view.title }))].map((t) => (
                 <Button key={t.key} size="sm" variant={(type ? picked : "payment") === t.key ? "secondary" : "ghost"} onClick={() => setPicked(t.key)}>
                   {t.title}
                 </Button>
               ))}
-            </div>
-          ) : (
-            <span />
-          )
+            {CHAINS[chain].drivechain && (
+              <Button variant="outline" size="sm" onClick={() => router.push("/send?deposit=1")}>
+                <LayersIcon /> Deposit to a sidechain
+              </Button>
+            )}
+          </div>
         ) : (
           <Button variant="ghost" size="sm" onClick={() => router.push("/send")}>
             <ArrowLeftIcon /> New payment
           </Button>
         )}
         <span className="text-sm text-muted-foreground">
-          {mode.kind === "bump" ? "Bump fee (RBF)" : mode.kind === "cpfp" ? "Accelerate with CPFP" : "New payment"} on {CHAINS[chain].label}
+          {mode.kind === "bump"
+            ? "Bump fee (RBF)"
+            : mode.kind === "cpfp"
+              ? "Accelerate with CPFP"
+              : mode.kind === "deposit"
+                ? "Sidechain deposit (BIP300)"
+                : "New payment"}{" "}
+          on {CHAINS[chain].label}
         </span>
       </div>
       {type ? (
@@ -174,12 +190,38 @@ function SendForm({ chain, snap, mode, preselect }: { chain: Chain; snap: Snapsh
   const coinPair = pairs.find((p) => CHAINS[p].replayLockTime)
   const [coinGuard, setCoinGuard] = useState(!!coinPair && wallet.settings.replayGuard)
   const [message, setMessage] = useState("")
-  const flow = useTxFlow(chain)
+  const flow = useTxFlow(chain, (txid) => {
+    const sidechain = depositTo?.sidechain
+    if (sidechain && wallet.wallet)
+      void api("/api/labels", { walletId: wallet.wallet.id, chain, type: "tx", ref: txid, label: `Deposit to ${sidechain.title} (sidechain ${sidechain.slot})` }).catch(() => {})
+  })
   const { step, busy } = flow
 
   // Fee-bump / CPFP context loaded from the chain
   const [bump, setBump] = useState<{ inputs: Coin[]; recipients: { address: string; amount: number }[]; data?: Uint8Array; fee: number; vsize: number } | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
+  // deposit: the active sidechains and their treasuries, from the chain's BIP300 enforcer
+  const [sidechains, setSidechains] = useState<Sidechain[] | null>(null)
+
+  useEffect(() => {
+    if (mode.kind !== "deposit") return
+    let live = true
+    api<{ sidechains: Sidechain[] }>("/api/sidechains", { chain })
+      .then((r) => live && setSidechains(r.sidechains.sort((a, b) => a.slot - b.slot)))
+      .catch((e) => live && setLoadError((e as Error).message))
+    return () => {
+      live = false
+    }
+  }, [mode.kind, chain])
+  const depositTo = (() => {
+    if (mode.kind !== "deposit") return null
+    try {
+      const { slot, address } = parseDepositAddress(recipients[0].address)
+      return { slot, address, sidechain: sidechains?.find((s) => s.slot === slot) }
+    } catch {
+      return null
+    }
+  })()
 
   useEffect(() => {
     if (mode.kind !== "bump") return
@@ -250,7 +292,7 @@ function SendForm({ chain, snap, mode, preselect }: { chain: Chain; snap: Snapsh
         if (!cpfpCoin) throw new PlanError("That coin is no longer unconfirmed in this wallet")
         if (cpfpParent?.fee == null) throw new PlanError("Parent fee unknown yet")
         plan = planTx({ chain, recipients: [{ address: changeAddress, amount: 0 }], sendMax: true, required: [cpfpCoin], fee: policy, changeAddress })
-      } else if (mode.kind === "send" || bump) {
+      } else if (mode.kind === "send" || mode.kind === "deposit" || bump) {
         const list = recipients.map((r, i) => {
           const amount = sendMax && i === 0 ? 0 : parseAmount(r.amount, unit)
           if (amount === null) throw new PlanError("Enter a valid amount")
@@ -263,6 +305,15 @@ function SendForm({ chain, snap, mode, preselect }: { chain: Chain; snap: Snapsh
         const guarding = coinPair && coinGuard && mode.kind === "send"
         if (guarding && !hasData(wallet.snapshots[coinPair]))
           throw new PlanError(`Waiting for ${CHAINS[coinPair].label} to sync to pick a coin it lacks (or turn off its replay protection)`)
+        // deposit: only to an active slot (an inactive one's output is anyone-can-spend), spending its current treasury
+        let deposit: { ctip: Ctip | null } | undefined
+        if (mode.kind === "deposit") {
+          const { slot } = parseDepositAddress(recipients[0].address)
+          if (!sidechains) throw new PlanError(`Loading ${meta.label} sidechains…`)
+          const sidechain = sidechains.find((s) => s.slot === slot)
+          if (!sidechain) throw new PlanError(`Sidechain slot ${slot} isn't active on ${meta.label}: a deposit there would be lost`)
+          deposit = { ctip: sidechain.ctip }
+        }
         plan = planTx({
           chain,
           recipients: list,
@@ -273,6 +324,7 @@ function SendForm({ chain, snap, mode, preselect }: { chain: Chain; snap: Snapsh
           changeAddress,
           data: mode.kind === "bump" ? bump?.data : data,
           guard: guarding ? { coins: [...(manualCoins ?? []), ...candidates].filter((c) => !shared.get(coinPair)!.has(outpoint(c))), pair: coinPair } : undefined,
+          deposit,
         })
       }
     } catch (e) {
@@ -293,7 +345,7 @@ function SendForm({ chain, snap, mode, preselect }: { chain: Chain; snap: Snapsh
     setSendMax(true)
     setManual(new Set(splittable.map((c) => outpoint(c.coin))))
   }
-  const sending = plan ? plan.outputs.filter((o) => o.kind === "recipient").reduce((s, o) => s + o.amount, 0) : 0
+  const sending = plan ? sentBy(plan) : 0
   const feeShare = plan && sending ? plan.fee / sending : 0
   const editable = step.name === "edit"
 
@@ -311,23 +363,37 @@ function SendForm({ chain, snap, mode, preselect }: { chain: Chain; snap: Snapsh
         {mode.kind !== "cpfp" && (
           <Card>
             <CardHeader>
-              <CardTitle>Recipients</CardTitle>
+              <CardTitle>{mode.kind === "deposit" ? "Sidechain deposit" : "Recipients"}</CardTitle>
               <CardDescription>
                 {mode.kind === "bump"
                   ? "Prefilled from the stuck transaction. Change amounts, add recipients, or use Max to take the higher fee from the payment."
-                  : "Batch several payments into one transaction, or sweep with Max."}
+                  : mode.kind === "deposit"
+                    ? `Moves ${meta.unit} into a BIP300 sidechain: paste a deposit address from the sidechain's wallet (s9_…), which names its slot and carries a checksum.`
+                    : "Batch several payments into one transaction, or sweep with Max."}
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               {recipients.map((r, i) => (
                 <div key={i} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_180px_auto]">
-                  <RecipientAddress
-                    chain={chain}
-                    index={i}
-                    disabled={!editable}
-                    value={r.address}
-                    onChange={(address) => setRecipients(recipients.map((x, j) => (j === i ? { ...x, address } : x)))}
-                  />
+                  {mode.kind === "deposit" ? (
+                    <Input
+                      disabled={!editable}
+                      spellCheck={false}
+                      placeholder="s9_…_checksum"
+                      value={r.address}
+                      onChange={(e) => setRecipients([{ ...r, address: e.target.value }])}
+                      className="font-mono text-xs"
+                      aria-label="Sidechain deposit address"
+                    />
+                  ) : (
+                    <RecipientAddress
+                      chain={chain}
+                      index={i}
+                      disabled={!editable}
+                      value={r.address}
+                      onChange={(address) => setRecipients(recipients.map((x, j) => (j === i ? { ...x, address } : x)))}
+                    />
+                  )}
                   <div className="relative">
                     <Input
                       disabled={!editable || (sendMax && i === 0)}
@@ -359,18 +425,42 @@ function SendForm({ chain, snap, mode, preselect }: { chain: Chain; snap: Snapsh
                   </div>
                 </div>
               ))}
-              <Button
-                variant="ghost"
-                size="sm"
-                className="self-start"
-                disabled={!editable}
-                onClick={() => {
-                  setSendMax(false)
-                  setRecipients([...recipients, { address: "", amount: "" }])
-                }}
-              >
-                <PlusIcon /> Add recipient
-              </Button>
+              {mode.kind === "deposit" ? (
+                <div className="flex flex-col gap-2 text-xs text-muted-foreground">
+                  {depositTo && (
+                    <p className={depositTo.sidechain || !sidechains ? "text-foreground" : "text-amber-600 dark:text-amber-400"}>
+                      To {depositTo.sidechain ? `${depositTo.sidechain.title} (slot ${depositTo.slot})` : `slot ${depositTo.slot}`}
+                      {sidechains && !depositTo.sidechain && `, not active on ${meta.label}`} ·{" "}
+                      <span className="font-mono break-all">{depositTo.address}</span>
+                    </p>
+                  )}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span>Active on {meta.label}:</span>
+                    {sidechains ? (
+                      sidechains.map((s) => (
+                        <Badge key={s.slot} variant="outline">
+                          {s.title} · {s.slot}
+                        </Badge>
+                      ))
+                    ) : (
+                      <Skeleton className="h-5 w-40" />
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="self-start"
+                  disabled={!editable}
+                  onClick={() => {
+                    setSendMax(false)
+                    setRecipients([...recipients, { address: "", amount: "" }])
+                  }}
+                >
+                  <PlusIcon /> Add recipient
+                </Button>
+              )}
             </CardContent>
           </Card>
         )}
@@ -583,7 +673,15 @@ function SendForm({ chain, snap, mode, preselect }: { chain: Chain; snap: Snapsh
             {plan ? (
               <>
                 <Row label="Inputs" value={`${plan.inputs.length} coin${plan.inputs.length === 1 ? "" : "s"} · ${formatAmount(plan.inputs.reduce((s, c) => s + c.value, 0), unit)}`} />
-                {mode.kind !== "cpfp" && <Row label="Sending" value={amountText(sending, chain, unit)} />}
+                {mode.kind !== "cpfp" && <Row label={plan.deposit ? "Depositing" : "Sending"} value={amountText(sending, chain, unit)} />}
+                {plan.deposit && (
+                  <Row
+                    label="Treasury"
+                    value={
+                      plan.deposit.ctip ? `${formatAmount(plan.deposit.ctip.value, unit)} → ${formatAmount(plan.deposit.ctip.value + sending, unit)}` : "first deposit"
+                    }
+                  />
+                )}
                 <Row
                   label="Change"
                   value={(() => {

@@ -4,7 +4,7 @@ import { sha256 } from "@noble/hashes/sha2.js"
 import { CHAINS, REPLAY_LOCKTIME, replayPairs, type Chain } from "@/lib/chains"
 import { db } from "@/lib/server/db"
 import { chainFor, type ChainClient } from "@/lib/server/watcher"
-import { addressFor, isDataScript, parseTxHex } from "@/lib/tx"
+import { addressFor, isDataScript, parseTxHex, vsizeOf } from "@/lib/tx"
 import { SIGHASH_UNIFIED } from "@/lib/unified-sighash"
 import { addressScript, type Family, type Fees } from "@/lib/wallet"
 
@@ -140,7 +140,7 @@ export async function analyzeReplay(walletId: string, from: Chain, txid: string,
   })
 
   const fee = totalIn === null ? null : totalIn - totalOut
-  const vsize = tx.vsize
+  const vsize = vsizeOf(tx)
   const feeRate = fee === null ? null : fee / vsize
   const targetHeight = dst.height
   const targetFees = dst.fees
