@@ -214,6 +214,8 @@ Every release ships the same installers: macOS (arm64, x64), Windows (x64, arm64
 4. Open the draft on [Releases](https://github.com/agustinkassis/gorilla-wallet/releases), review the generated notes
    and files (10: two `.dmg`, two `-setup.exe`, and an AppImage, `.deb` and `.rpm` per Linux arch), and **Publish
    release**.
+5. Generate the social images with `pnpm social` and announce the release with them (see
+   [docs/SOCIAL.md](docs/SOCIAL.md)).
 
 ## Scripts
 
@@ -227,6 +229,7 @@ Every release ships the same installers: macOS (arm64, x64), Windows (x64, arm64
 | `pnpm lint` | ESLint |
 | `pnpm db:migrate` | Apply Prisma migrations |
 | `pnpm tauri build` | Desktop app for this OS/arch (see above) |
+| `pnpm social` | Social images for the current version in `social/` (see [docs/SOCIAL.md](docs/SOCIAL.md)) |
 
 ## Security model
 

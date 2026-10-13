@@ -15,7 +15,8 @@
     "postinstall": "prisma generate",
     "db:migrate": "prisma migrate deploy",
     "tauri": "tauri",
-    "check:cli:regtest": "node scripts/check-cli-regtest.mjs"
+    "check:cli:regtest": "node scripts/check-cli-regtest.mjs",
+    "social": "node scripts/social.mjs"
   },
   "dependencies": {
     "@ngraveio/bc-ur": "^1.1.13",

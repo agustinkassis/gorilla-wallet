@@ -46,3 +46,6 @@ yarn-error.log*
 .idea/
 .claude/
 .vercel
+
+# social images, regenerated per release (pnpm social, docs/SOCIAL.md)
+/social/
