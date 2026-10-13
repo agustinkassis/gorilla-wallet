@@ -7,7 +7,7 @@ import { Prisma } from "@/lib/generated/prisma/client"
 import { Electrum } from "@/lib/server/electrum"
 import { getSettings } from "@/lib/server/settings"
 import { listWallets } from "@/lib/server/wallets"
-import { parseTxHex as parseTx } from "@/lib/tx"
+import { parseTxHex as parseTx, vsizeOf } from "@/lib/tx"
 import { CHAINS, CHAIN_IDS, syncedChains, type Chain, type Family } from "@/lib/chains"
 import { addressScript, deriveAddress, scriptHash, type Account, type Fees, type Snapshot, type WalletInfo } from "@/lib/wallet"
 
@@ -486,7 +486,7 @@ class WalletSync {
       if (totalIn !== null) totalIn += prev.amount ?? 0n
       if (prev.script && this.scripts.has(bytesToHex(prev.script))) amount -= prev.amount ?? 0n
     }
-    return { amount, fee: totalIn === null ? null : totalIn - totalOut, vsize: tx.vsize }
+    return { amount, fee: totalIn === null ? null : totalIn - totalOut, vsize: vsizeOf(tx) }
   }
 
   /** Rebuild the snapshot from SQLite (labels and frozen flags joined in) and broadcast it. */

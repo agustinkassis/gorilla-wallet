@@ -132,6 +132,12 @@ activates drivechains (BIP300/301). Keys and addresses are Bitcoin's: the same w
   spends at least one coin eCash lacks (received after the fork, or already split there), so eCash rejects the whole
   transaction. On eCash, **Split coins** sends your coins still shared with Bitcoin to yourself, protected: afterwards
   Bitcoin spends of them can't be replayed onto eCash.
+- **Deposit to a sidechain** (Send → *Deposit to a sidechain*, BIP300 M5): paste a sidechain deposit address
+  (`s9_<address>_<checksum>` from Thunder, BitNames, BitAssets, Photon…). The transaction spends the sidechain's
+  treasury (CTIP, unsigned) with your coins into a new treasury holding both, followed by an OP_RETURN with the sidechain
+  address. Active slots and treasuries come from a bip300301_enforcer (`PECX_ENFORCER`, default
+  `https://enforcer.beta.ecash.ninja`); the signer refuses inactive slots (their output would be anyone-can-spend) and
+  stale treasuries. Betanet's OP_DRIVECHAIN is OP_NOP8 (`0xb7`), not BIP300's OP_NOP5.
 
 ## Configuration
 
@@ -143,6 +149,7 @@ Copy `.env.example` to `.env` only to change a default.
 | `DERIVATION_PATH` | Its account path, default `m/84'/0'/0'` (P2WPKH) |
 | `ALLOWED_PUBKEYS` | Optional npub/hex allowlist. Set: every API call needs a NIP-98 login from one of these keys. Unset: no login, localhost only |
 | `<CHAIN>_ELECTRUM` | Comma-separated `tcp://` / `ssl://` Electrum servers, tried in order (`BTC_ELECTRUM`, `XBT_ELECTRUM`, `PECX_ELECTRUM`, `TBTC4_ELECTRUM`, …). Settings → Networks overrides it |
+| `<CHAIN>_ENFORCER` | BIP300 enforcers (Connect/HTTP) for sidechain deposits, comma-separated (`PECX_ENFORCER`) |
 | `ELECTRUM_SELF_SIGNED` | Comma-separated Electrum hosts whose `ssl://` certificate isn't verified (a self-signed node you trust). Every other `ssl://` server needs a valid certificate |
 | `MEMPOOL_<CHAIN>_URL` | mempool.space-compatible APIs: fees, broadcast, explorer links (`MEMPOOL_BTC_URL`, …) |
 | `DATABASE_URL` | SQLite file (default `file:./data/wallet.db`) |

@@ -37,6 +37,11 @@ export type ChainDef = {
   forkHeight?: number
   /** not launched yet: listed with a countdown to forkHeight, can't be selected or synced */
   soon?: boolean
+  /**
+   * BIP300 sidechain deposits (M5): the byte this chain's build uses for OP_DRIVECHAIN, and default enforcers
+   * (bip300301_enforcer's Connect/JSON API: active slots and their treasury UTXOs, which Electrum can't tell)
+   */
+  drivechain?: { opcode: number; enforcer: string[] }
 }
 
 export type Chain = "btc" | "xbt" | "ecx" | "pecx" | "tbtc4" | "tbtc3" | "signet" | "regtest"
@@ -91,6 +96,7 @@ export const CHAINS: Record<Chain, ChainDef> = {
     replayLockTime: true,
     forkHeight: 973_728,
     soon: true,
+    // drivechain: add at launch, once its build's OP_DRIVECHAIN byte and a public enforcer are known
   },
   pecx: {
     label: "eCash Beta",
@@ -104,6 +110,8 @@ export const CHAINS: Record<Chain, ChainDef> = {
     replayPair: "btc",
     replayLockTime: true,
     forkHeight: 967_680,
+    // betanet moved OP_DRIVECHAIN from BIP300's OP_NOP5 (0xb4) to OP_NOP8 (bip300301_enforcer NetworkParams::betanet)
+    drivechain: { opcode: 0xb7, enforcer: ["https://enforcer.beta.ecash.ninja"] },
   },
   tbtc4: {
     label: "Testnet4",
