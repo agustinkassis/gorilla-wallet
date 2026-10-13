@@ -41,6 +41,10 @@ import { parseSettings } from "../lib/server/settings"
 import { headerTime } from "../lib/server/watcher"
 import { signWith, type SignContext } from "../lib/server/sign-core"
 import { validateBroadcast } from "../lib/server/broadcast"
+import { moduleFetch, storageGet, storageSet } from "../lib/server/modules"
+import { MODULE_ID, type ModuleManifest } from "../lib/modules/types"
+import { MODULES } from "../modules"
+import { UIS } from "../modules/ui"
 
 const throws = async (fn: () => unknown, re: RegExp) => {
   try {
@@ -396,6 +400,32 @@ const throws = async (fn: () => unknown, re: RegExp) => {
   assert.throws(() => parseSettings({ hidden: ["doge"] }), /Invalid setting/)
   assert.throws(() => parseSettings({ hidden: "xbt" }), /Invalid setting/)
   assert.deepEqual(parseSettings({ chain: "pecx" }), { chain: "pecx" })
+  assert.deepEqual(parseSettings({ modules: { example: true } }), { modules: { example: true } })
+  assert.throws(() => parseSettings({ modules: { nope: true } }), /Invalid setting/)
+  assert.throws(() => parseSettings({ modules: { example: "yes" } }), /Invalid setting/)
+
+  // --- modules: manifests are sane, storage is per module, http only reaches declared hosts ----------
+  assert.equal(new Set(MODULES.map((m) => m.id)).size, MODULES.length, "module ids are unique")
+  for (const m of MODULES) {
+    assert.match(m.id, MODULE_ID)
+    assert.ok(UIS[m.ui], `${m.id}: UI "${m.ui}" is registered in modules/ui.ts`)
+    for (const h of m.hosts ?? []) assert.match(h, /^(?!localhost$)[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/, `${m.id}: ${h} must be a public hostname`)
+  }
+  const modA = { ...MODULES[0], id: "check-a", hosts: ["api.example.org"] } as ModuleManifest
+  const modB = { ...modA, id: "check-b" }
+  await storageSet(modA, "k", { n: 1 })
+  assert.deepEqual(await storageGet(modA, "k"), { n: 1 })
+  assert.equal(await storageGet(modB, "k"), null, "one module can't read another's storage")
+  await storageSet(modA, "k", null)
+  assert.equal(await storageGet(modA, "k"), null)
+  await throws(() => storageSet(modA, "../chain", 1), /Storage keys/)
+  await throws(() => storageSet(modA, "big", "x".repeat(70_000)), /64 KB/)
+  await throws(() => moduleFetch(modA, { url: "https://evil.example/" }), /isn't one of/)
+  await throws(() => moduleFetch(modA, { url: "http://api.example.org/" }), /isn't one of/) // https only
+  await throws(() => moduleFetch(modA, { url: "https://api.example.org:8443/" }), /isn't one of/)
+  await throws(() => moduleFetch(modA, { url: "https://user@api.example.org/" }), /isn't one of/)
+  await throws(() => moduleFetch(modA, { url: "https://api.example.org/", headers: { Cookie: "a=b" } }), /Header not allowed/)
+  await throws(() => moduleFetch(modA, { url: "https://api.example.org/", method: "PATCH" as "GET" }), /not allowed/)
   assert.throws(() => parseSettings({ chain: "ecx" }), /Invalid setting/, "eCash mainnet can't be selected before it launches")
 
   // --- labels: one chain each, address refs checked against that chain's network ---------------
@@ -417,6 +447,8 @@ const throws = async (fn: () => unknown, re: RegExp) => {
   assert.equal((await local({ host: "localhost:3000", origin: "http://evil.example" }))?.status, 403, "other site refused")
   assert.equal((await local({ host: "localhost:3000", origin: "http://localhost:5173" }))?.status, 403, "other local app refused")
   assert.equal((await local({ host: "localhost:3000", origin: "null" }))?.status, 403, "opaque origin refused")
+  assert.equal((await local({ host: "localhost:3000", "sec-fetch-site": "cross-site" }))?.status, 403, "no-cors request from a sandboxed frame refused")
+  assert.equal((await local({ host: "example.localhost:3000" }))?.status, 403, "a module's dev origin refused")
 
   // --- NIP-98: allowlist + payload binding ------------------------------------------------------
   const allowed = generateSecretKey()
@@ -425,6 +457,8 @@ const throws = async (fn: () => unknown, re: RegExp) => {
   const req = (auth?: string, method = "GET") => new Request(url, { method, headers: auth ? { authorization: auth } : {} })
   assert.equal(await requireNostr(req(await tokenFor(allowed))), null)
   assert.equal((await requireNostr(req(await tokenFor(generateSecretKey()))))?.status, 403)
+  const fromFrame = new Request(url, { headers: { authorization: await tokenFor(allowed), origin: "null" } })
+  assert.equal((await requireNostr(fromFrame))?.status, 403, "a module frame can't use a signed token either")
   assert.equal((await requireNostr(req()))?.status, 401)
   assert.equal((await requireNostr(req(await tokenFor(allowed, "http://evil.example/api/stream"))))?.status, 401)
   const body = { chain: "btc", hex: "00" }

@@ -1,6 +1,7 @@
 import "server-only"
 import { db } from "@/lib/server/db"
 import { CHAINS, DEFAULT_SETTINGS, isChain, type ChainSources, type FeePreset, type Settings } from "@/lib/wallet"
+import { moduleById } from "@/modules"
 
 const listeners = new Set<(s: Settings) => void>()
 export const onSettings = (l: (s: Settings) => void) => (listeners.add(l), () => void listeners.delete(l))
@@ -46,6 +47,8 @@ export function parseSettings(input: unknown): Partial<Settings> {
     else if (k === "sources") out.sources = parseSources(v)
     else if (k === "feePreset" && PRESETS.includes(v as FeePreset)) out.feePreset = v as FeePreset
     else if ((k === "gapReceive" || k === "gapChange") && isGap(v)) out[k] = v as number
+    else if (k === "modules" && v && typeof v === "object" && Object.entries(v).every(([id, on]) => moduleById(id) && typeof on === "boolean"))
+      out.modules = v as Record<string, boolean>
     else throw new Error(`Invalid setting: ${k}`)
   }
   return out

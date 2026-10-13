@@ -72,6 +72,8 @@ export type Settings = {
   replayGuard: boolean
   gapReceive: number
   gapChange: number
+  /** module id → on/off (Settings → Modules); missing: the manifest's default */
+  modules: Record<string, boolean>
 }
 export const DEFAULT_SETTINGS: Settings = {
   chain: "btc",
@@ -83,6 +85,7 @@ export const DEFAULT_SETTINGS: Settings = {
   replayGuard: false,
   gapReceive: 20,
   gapChange: 10,
+  modules: {},
 }
 
 export type StreamMessage =

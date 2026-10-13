@@ -98,6 +98,14 @@ Each chain can use several Electrum servers and mempool.space-compatible explore
 - **Light / dark / system theme**, switched with a circular reveal; glass surfaces, page and list transitions
 - **Local SQLite cache** (Prisma): addresses, UTXOs, txs, raw txs, block times, labels, settings; warm start, Electrum status-hash sync
 
+## Modules
+
+Modules add pages (sidebar → Apps), dashboard cards and transaction types (Send), per chain. Each runs in a sandboxed
+frame with no access to keys, passwords or the wallet's data: only a small API (network info, receive address,
+balance, proposing transactions you review and sign, its own storage, HTTPS to the hosts it declares), limited to the
+permissions shown in **Settings → Modules**, where each one is turned on or off. See [docs/MODULES.md](docs/MODULES.md)
+to write one; `modules/example` is the reference.
+
 ## Blake2b (XBT)
 
 Select **Blake** or **Bitcoin** in the navbar: the same keys are tracked on both chains of the BLAKE2b fork:
@@ -267,17 +275,23 @@ Every release ships the same installers: macOS (arm64, x64), Windows (x64, arm64
 - Software wallets with a password store their recovery words only encrypted with it; a stolen database can't spend
   them. Wallets created without a password can be spent by anyone with the database.
   Watch-only wallets can't sign. `.env` and `data/` are git-ignored.
+- Modules run in sandboxed, opaque-origin frames with no network of their own; the API refuses requests from them, and
+  they reach the wallet only through permission-checked messages ([docs/MODULES.md](docs/MODULES.md#security-model)).
 
 ## Layout
 
 ```
-app/                 pages (dashboard, send, receive, transactions, utxos, settings) and API routes
+app/(wallet)/        pages (dashboard, send, receive, transactions, utxos, settings, module apps)
+app/(module)/        module frames (sandboxed, own root layout)
+app/api/             API routes
 components/          UI (shadcn/ui), providers, QR
 lib/chains.ts        chain registry: networks, address families, features, default sources
 lib/wallet.ts        shared types and address helpers
 lib/tx.ts            coin selection, fee policies, PSBT building, per-chain output rules
 lib/unified-sighash.ts  SIGHASH_UNIFIED
 lib/server/          wallets, seed encryption, auth, Electrum client, sync engine, signer, settings, labels (server-only)
+lib/modules/         module types and the SDK modules use
+modules/             module registry and modules (docs/MODULES.md)
 prisma/              schema and migrations
 scripts/check.ts     pnpm check
 scripts/desktop.mjs  desktop bundle inputs (Next.js standalone server + Node sidecar)

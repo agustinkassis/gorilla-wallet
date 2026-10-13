@@ -30,6 +30,7 @@ import { WatchOnlyBadge } from "@/components/wallet-switcher"
 import { api } from "@/lib/api"
 import { canNotify, requestNotifications } from "@/lib/notify"
 import { cn } from "@/lib/utils"
+import { moduleById } from "@/modules"
 import { CHAINS, WEB_CHAIN_IDS, isChain, pendingIncoming, type Chain } from "@/lib/wallet"
 
 export const shorten = (s: string, n = 8) => (s.length > n * 2 + 1 ? `${s.slice(0, n)}…${s.slice(-n)}` : s)
@@ -54,7 +55,9 @@ export function SiteHeader() {
   const { pubkey, required, profile, login, logout } = useNostr()
   const { snapshots, chain, watchOnly } = useWallet()
   const incoming = pendingIncoming({ [chain]: snapshots[chain] }).length > 0
-  const title = NAV.find((n) => n.href === pathname)?.title ?? "Gorilla Wallet"
+  const [, apps, moduleId, viewId] = pathname.split("/")
+  const title =
+    NAV.find((n) => n.href === pathname)?.title ?? (apps === "apps" && moduleById(moduleId)?.views.find((v) => v.id === viewId)?.title) ?? "Gorilla Wallet"
   const npub = pubkey ? nip19.npubEncode(pubkey) : ""
   const name = profile?.display_name || profile?.name || shorten(npub, 6)
 

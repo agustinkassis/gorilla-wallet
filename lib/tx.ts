@@ -11,7 +11,8 @@ import { SIGHASH_ALL_UNIFIED, SIGHASH_UNIFIED, unifiedSighash } from "@/lib/unif
 import { CHAINS, REPLAY_LOCKTIME, dataCapPair, familyOf, minDataScript, networkOf, type Chain } from "@/lib/chains"
 
 export type Coin = { txid: string; vout: number; value: number; address: string; change: 0 | 1; index: number; height: number }
-export type Recipient = { address: string; amount: number }
+/** An address, or a raw output script (module transactions). */
+export type Recipient = { address?: string; script?: Uint8Array; amount: number }
 export type PlannedOutput = { script: Uint8Array; amount: number; address?: string; kind: "recipient" | "change" | "data" }
 /** A sidechain's treasury UTXO (BIP300 CTIP): anyone-can-spend, holding everything deposited to it. */
 export type Ctip = { txid: string; vout: number; value: number }
@@ -187,13 +188,16 @@ export function planTx(o: {
   guard?: { coins: Coin[]; pair: Chain }
   deposit?: { ctip: Ctip | null }
 }): TxPlan {
-  if (!o.recipients.length) throw new PlanError("Add a recipient")
+  if (!o.recipients.length && !o.data) throw new PlanError("Add a recipient")
   if (o.data && (CHAINS[o.chain].maxDataScript === false || CHAINS[o.chain].noDataOutputs))
     throw new PlanError(`OP_RETURN outputs are not allowed on ${CHAINS[o.chain].label}`)
-  const dest = o.deposit ? parseDepositAddress(o.recipients[0].address) : null
+  const dest = o.deposit ? parseDepositAddress(o.recipients[0]?.address ?? "") : null
   if (dest && (o.recipients.length !== 1 || o.data)) throw new PlanError("A deposit goes to a single sidechain address")
   const deposit: Deposit | undefined = dest ? { ...dest, ctip: o.deposit!.ctip } : undefined
-  const recipients = o.recipients.map((r) => ({ ...r, script: dest ? drivechainScript(o.chain, dest.slot) : scriptFor(r.address, o.chain) }))
+  const recipients = o.recipients.map((r) => {
+    const script = dest ? drivechainScript(o.chain, dest.slot) : (r.script ?? scriptFor(r.address ?? "", o.chain))
+    return { ...r, script, address: r.address ?? addressFor(script, o.chain) }
+  })
   const dataScript = dest ? depositDataScript(dest.address) : o.data ? opReturnScript(o.data, o.chain) : null
   const vsizeFor = (inputs: number, scripts: Uint8Array[]) => estimateVsize(inputs, scripts, deposit?.ctip ? 1 : 0)
   for (const s of [...recipients.map((r) => r.script), ...(dataScript ? [dataScript] : [])]) {

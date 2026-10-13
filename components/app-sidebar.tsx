@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { ArrowDownLeftIcon, ArrowLeftRightIcon, ArrowUpRightIcon, CoinsIcon, LayoutDashboardIcon, SettingsIcon } from "lucide-react"
+import { ArrowDownLeftIcon, ArrowLeftRightIcon, ArrowUpRightIcon, CoinsIcon, LayoutDashboardIcon, PuzzleIcon, SettingsIcon } from "lucide-react"
 import {
   Sidebar,
   SidebarContent,
@@ -20,6 +20,8 @@ import {
 import { useWallet } from "@/components/wallet-provider"
 import { WalletSwitcher } from "@/components/wallet-switcher"
 import { CHAINS, pendingIncoming } from "@/lib/wallet"
+import { DynamicIcon } from "lucide-react/dynamic"
+import { viewsFor } from "@/modules"
 import { cn } from "@/lib/utils"
 
 export const NAV = [
@@ -53,8 +55,9 @@ export function StatusDot({ on, className }: { on: boolean; className?: string }
 export function AppSidebar() {
   const pathname = usePathname()
   const { setOpenMobile } = useSidebar()
-  const { snapshots, live, chains, chain: active } = useWallet()
+  const { snapshots, live, chains, chain: active, settings } = useWallet()
   const incoming = pendingIncoming({ [active]: snapshots[active] }).length
+  const apps = viewsFor(settings.modules, active, "page")
 
   return (
     <Sidebar collapsible="icon" variant="inset">
@@ -92,6 +95,28 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+        {apps.length > 0 && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Apps</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {apps.map(({ module, view }) => {
+                  const href = `/apps/${module.id}/${view.id}`
+                  return (
+                    <SidebarMenuItem key={href}>
+                      <SidebarMenuButton asChild isActive={pathname === href} tooltip={view.title}>
+                        <Link href={href} onClick={() => setOpenMobile(false)}>
+                          {view.icon ? <DynamicIcon name={view.icon} fallback={() => <PuzzleIcon />} /> : <PuzzleIcon />}
+                          <span>{view.title}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  )
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
 
       <SidebarFooter>
