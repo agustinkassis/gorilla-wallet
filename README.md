@@ -1,7 +1,7 @@
 # 🦍 Gorilla Wallet
 
 A self-hosted, multi-wallet Bitcoin wallet with optional Nostr login, coin control, several networks (Bitcoin, the
-**Blake2b (XBT)** fork, Testnet4, Testnet3, Signet) and a desktop app for macOS, Windows and Linux.
+**Blake2b (XBT)** fork, the **eCash (pECX)** BIP300 betanet, Testnet4, Testnet3, Signet) and a desktop app for macOS, Windows and Linux.
 
 Keys live only on your server. The browser gets each wallet's xpub (to derive addresses and build unsigned PSBTs)
 and asks the backend to sign. It runs with an **empty `.env`**: no login, and only reachable from this machine. Set
@@ -61,15 +61,16 @@ Software wallets keep their recovery words in SQLite **encrypted with the wallet
 for that signature only. The password is optional: without one the words are stored unencrypted and signing asks
 for nothing. Every wallet syncs in the background over one shared Electrum connection per chain.
 
-Each wallet has an account per family of networks: mainnet (Bitcoin, Blake) at `m/84'/0'/0'` and testnets (Testnet4,
+Each wallet has an account per family of networks: mainnet (Bitcoin, Blake, eCash) at `m/84'/0'/0'` and testnets (Testnet4,
 Testnet3, Signet) at `m/84'/1'/0'`, like Sparrow and Electrum. New wallets get both; a password-protected wallet from
 an earlier version asks for its password once to enable testnets.
 
 ## Networks
 
-Pick the network in the navbar (top right): **Bitcoin**, **Blake**, **Testnet4**, **Testnet3** or **Signet**, one at a
-time. A fork's replay pair syncs along in the background (on Bitcoin, Blake too; on Blake, Bitcoin), so replay checks
-and the OP_RETURN guard always have both chains.
+Pick the network in the navbar (top right): **Bitcoin**, **Blake**, **eCash Beta**, **Testnet4**, **Testnet3** or
+**Signet**, one at a time. A fork's replay pairs sync along in the background (on Bitcoin, Blake and eCash Beta too; on
+a fork, Bitcoin), so replay checks and the replay guards always have both chains. **eCash** (mainnet) is listed as
+*Soon* with a countdown to its fork block.
 
 Every chain is data in [`lib/chains.ts`](lib/chains.ts): address family, colors, default sources, and features such as
 SIGHASH_UNIFIED replay protection, consensus output limits and its replay pair. Adding a chain is adding an entry.
@@ -86,16 +87,24 @@ Each chain can use several Electrum servers and mempool.space-compatible explore
   or bring back a tx **signed on another device** (scan UR/BBQr with the camera, paste, or load `.psbt`/`.txn`), which is
   finalized and verified against the reviewed transaction (same txid, valid signatures, `0x21` on Blake); then broadcast
 - **Fee bumping**: RBF (redesign the replacement: add coins, change amounts, take the fee from the payment) and CPFP
-- **Replay** (Bitcoin ↔ Blake): analyze rebroadcasting any transaction in your history on the other chain, including
+- **Replay** (Bitcoin ↔ Blake, eCash): analyze rebroadcasting any transaction in your history on the other chain, including
   incoming ones that spend someone else's coins, with an inputs → tx → outputs graph and the reason it works or not,
   then broadcast it
-- **Networks**: Bitcoin, Blake, Testnet4, Testnet3 and Signet from the navbar, with editable sources per chain
+- **Networks**: Bitcoin, Blake, eCash Beta, Testnet4, Testnet3 and Signet from the navbar, with editable sources per chain
 - **Sats / BTC switch** in the navbar: every amount in the app in sats or in coins
 - **Coin control**: freeze / unfreeze, labels on coins, addresses and txs, BIP-329 export/import
 - **Receive**: next unused address with QR, gap-limit discovery (20 receive / 10 change), change on the internal chain
 - **Notifications**: toast, sound, animation and system notification on incoming payments and confirmations
 - **Light / dark / system theme**, switched with a circular reveal; glass surfaces, page and list transitions
 - **Local SQLite cache** (Prisma): addresses, UTXOs, txs, raw txs, block times, labels, settings; warm start, Electrum status-hash sync
+
+## Modules
+
+Modules add pages (sidebar → Apps), dashboard cards and transaction types (Send), per chain. Each runs in a sandboxed
+frame with no access to keys, passwords or the wallet's data: only a small API (network info, receive address,
+balance, proposing transactions you review and sign, its own storage, HTTPS to the hosts it declares), limited to the
+permissions shown in **Settings → Modules**, where each one is turned on or off. See [docs/MODULES.md](docs/MODULES.md)
+to write one; `modules/example` is the reference.
 
 ## Blake2b (XBT)
 
@@ -114,6 +123,24 @@ Select **Blake** or **Bitcoin** in the navbar: the same keys are tracked on both
   Blake coins): those coins move exactly where their owner sent them on the source chain. The server re-runs the
   analysis and broadcasts the source chain's own bytes.
 
+## eCash (ECX, BIP300)
+
+[eCash](https://github.com/eCash-com/fast-facts) is LayerTwo Labs' hard fork of Bitcoin (Bitcoin Core 31.1) that
+activates drivechains (BIP300/301). Keys and addresses are Bitcoin's: the same wallet holds both.
+
+- **eCash Beta (pECX)**: the betanet, forked at block 967,680, practice coins. Electrum
+  `ssl://explorer.beta.ecash.ninja:50002`, explorer/API `https://explorer.beta.ecash.ninja` (its Esplora API isn't
+  mempool.space-shaped, so it isn't a source), P2P `seed.beta.ecash.ninja:8533`, magic `0xeca5b104`.
+- **eCash (ECX)**: mainnet, *Soon*: forks at block ~973,728 (~2026-10-31). The navbar counts down from Bitcoin's tip;
+  it becomes selectable once a release adds its servers.
+- eCash sends use **nLockTime 499,999,999** (`LOCKTIME_THRESHOLD - 1`) with RBF inputs: eCash treats it as final,
+  Bitcoin (and Blake) as a block ~500M blocks away, so they never confirm there. The signer and broadcast refuse an
+  eCash transaction without it.
+- Nothing marks a Bitcoin transaction as invalid on eCash. **Not replayable on eCash Beta** (Bitcoin sends) instead
+  spends at least one coin eCash lacks (received after the fork, or already split there), so eCash rejects the whole
+  transaction. On eCash, **Split coins** sends your coins still shared with Bitcoin to yourself, protected: afterwards
+  Bitcoin spends of them can't be replayed onto eCash.
+
 ## Configuration
 
 Copy `.env.example` to `.env` only to change a default.
@@ -123,7 +150,7 @@ Copy `.env.example` to `.env` only to change a default.
 | `SEED_PHRASE` | Optional default wallet (BIP39). Never sent to the browser or stored |
 | `DERIVATION_PATH` | Its account path, default `m/84'/0'/0'` (P2WPKH) |
 | `ALLOWED_PUBKEYS` | Optional npub/hex allowlist. Set: every API call needs a NIP-98 login from one of these keys. Unset: no login, localhost only |
-| `<CHAIN>_ELECTRUM` | Comma-separated `tcp://` / `ssl://` Electrum servers, tried in order (`BTC_ELECTRUM`, `XBT_ELECTRUM`, `TBTC4_ELECTRUM`, …). Settings → Networks overrides it |
+| `<CHAIN>_ELECTRUM` | Comma-separated `tcp://` / `ssl://` Electrum servers, tried in order (`BTC_ELECTRUM`, `XBT_ELECTRUM`, `PECX_ELECTRUM`, `TBTC4_ELECTRUM`, …). Settings → Networks overrides it |
 | `ELECTRUM_SELF_SIGNED` | Comma-separated Electrum hosts whose `ssl://` certificate isn't verified (a self-signed node you trust). Every other `ssl://` server needs a valid certificate |
 | `MEMPOOL_<CHAIN>_URL` | mempool.space-compatible APIs: fees, broadcast, explorer links (`MEMPOOL_BTC_URL`, …) |
 | `DATABASE_URL` | SQLite file (default `file:./data/wallet.db`) |
@@ -238,17 +265,23 @@ Every release ships the same installers: macOS (arm64, x64), Windows (x64, arm64
 - Software wallets with a password store their recovery words only encrypted with it; a stolen database can't spend
   them. Wallets created without a password can be spent by anyone with the database.
   Watch-only wallets can't sign. `.env` and `data/` are git-ignored.
+- Modules run in sandboxed, opaque-origin frames with no network of their own; the API refuses requests from them, and
+  they reach the wallet only through permission-checked messages ([docs/MODULES.md](docs/MODULES.md#security-model)).
 
 ## Layout
 
 ```
-app/                 pages (dashboard, send, receive, transactions, utxos, settings) and API routes
+app/(wallet)/        pages (dashboard, send, receive, transactions, utxos, settings, module apps)
+app/(module)/        module frames (sandboxed, own root layout)
+app/api/             API routes
 components/          UI (shadcn/ui), providers, QR
 lib/chains.ts        chain registry: networks, address families, features, default sources
 lib/wallet.ts        shared types and address helpers
 lib/tx.ts            coin selection, fee policies, PSBT building, per-chain output rules
 lib/unified-sighash.ts  SIGHASH_UNIFIED
 lib/server/          wallets, seed encryption, auth, Electrum client, sync engine, signer, settings, labels (server-only)
+lib/modules/         module types and the SDK modules use
+modules/             module registry and modules (docs/MODULES.md)
 prisma/              schema and migrations
 scripts/check.ts     pnpm check
 scripts/desktop.mjs  desktop bundle inputs (Next.js standalone server + Node sidecar)

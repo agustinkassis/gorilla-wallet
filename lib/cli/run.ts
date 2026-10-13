@@ -54,6 +54,8 @@ function required(args: Args, name: string) {
   if (value === undefined || value === "") throw new CliError(`--${name} is required`)
   return value
 }
+// ponytail: the CLI covers btc/xbt/regtest; eCash Beta (a replay pair of btc on the web) is left out until it's needed here
+const synced = (chain: Chain) => syncedChains(chain).filter((c) => c === "btc" || c === "xbt" || c === "regtest")
 function chainArg(args: Args, fallback?: "btc"): "btc" | "xbt" | "regtest" {
   const chain = args.value("chain") ?? fallback
   if (chain !== "btc" && chain !== "xbt" && chain !== "regtest") throw new CliError("--chain must be btc, xbt or regtest")
@@ -148,7 +150,7 @@ export async function runCli(argv: readonly string[]) {
     const requested = args.value("chain") ?? "all"
     chains = requested === "all" ? ["btc", "xbt"] : [chainArg(args)]
   } else if (["transactions", "tx-status", "send"].includes(command)) chains = [chainArg(args)]
-  else if (args.value("chain")) chains = syncedChains(chainArg(args))
+  else if (args.value("chain")) chains = synced(chainArg(args))
   const family = familyOf(chains[0])
   const passwords = new Map<string, string>()
   if (command !== "wallet export-seed") {
@@ -206,10 +208,10 @@ export async function runCli(argv: readonly string[]) {
     if (command === "addresses") {
       const [addresses, states, labels] = await Promise.all([
         db.address.findMany({ where: { walletId: wallet.id, family }, orderBy: [{ change: "asc" }, { index: "asc" }] }),
-        db.addressState.findMany({ where: { walletId: wallet.id, chain: { in: syncedChains(chains[0]) } } }),
+        db.addressState.findMany({ where: { walletId: wallet.id, chain: { in: synced(chains[0]) } } }),
         db.label.findMany({ where: { walletId: wallet.id, type: "addr", chain: chainArg(args, "btc") } }),
       ])
-      return { walletId: wallet.id, addresses: addresses.map((a) => ({ address: a.address, index: a.index, change: a.change, label: labels.find((l) => l.ref === a.address)?.label ?? null, chains: syncedChains(chains[0]).map((chain) => {
+      return { walletId: wallet.id, addresses: addresses.map((a) => ({ address: a.address, index: a.index, change: a.change, label: labels.find((l) => l.ref === a.address)?.label ?? null, chains: synced(chains[0]).map((chain) => {
         const state = states.find((s) => s.address === a.address && s.chain === chain)
         const history: [string, number][] = JSON.parse(state?.history ?? "[]")
         return { chain, used: state?.used ?? false, transactions: new Set(history.map(([txid]) => txid)).size }
@@ -236,7 +238,7 @@ export async function runCli(argv: readonly string[]) {
       if (!address) throw new CliError("UTXO address was not discovered")
       return { ...u, change: address.change, index: address.index }
     }).filter((c) => (c.height > 0 || c.change === 1) && c.value > rate * INPUT_VSIZE)
-    const usedChange = await db.addressState.findMany({ where: { walletId: wallet.id, chain: { in: syncedChains(chains[0]) }, used: true }, select: { address: true } })
+    const usedChange = await db.addressState.findMany({ where: { walletId: wallet.id, chain: { in: synced(chains[0]) }, used: true }, select: { address: true } })
     const used = new Set(usedChange.map((a) => a.address))
     let changeIndex = 0
     while (used.has(deriveAddress(account.xpub, 1, changeIndex, family).address)) changeIndex++

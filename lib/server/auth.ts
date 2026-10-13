@@ -24,6 +24,9 @@ const LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/
  */
 // ponytail: `u` tag is matched against req.url; behind a reverse proxy, compare against an APP_URL env instead.
 export async function requireNostr(req: Request, body?: object): Promise<Response | null> {
+  // Only the app's own pages: never an opaque origin or <id>.localhost (module frames) or another site, login or not.
+  if (req.headers.get("origin") === "null" || req.headers.get("sec-fetch-site") === "cross-site" || /\.localhost(:\d+)?$/i.test(req.headers.get("host") ?? ""))
+    return Response.json({ error: "Requests from other sites or sandboxed frames are refused" }, { status: 403 })
   const allowed = allowedPubkeys()
   if (!allowed.size) {
     const host = req.headers.get("host") ?? ""

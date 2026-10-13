@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react"
-import { CheckIcon, DownloadIcon, EyeIcon, EyeOffIcon, NetworkIcon, Trash2Icon, UploadIcon } from "lucide-react"
+import { CheckIcon, DownloadIcon, EyeIcon, EyeOffIcon, NetworkIcon, PuzzleIcon, Trash2Icon, UploadIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { SetFingerprint } from "@/components/add-wallet"
@@ -10,11 +10,12 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { forkCountdown } from "@/components/site-header"
 import { useWallet } from "@/components/wallet-provider"
 import { KIND, WatchOnlyBadge } from "@/components/wallet-switcher"
 import { api, download } from "@/lib/api"
 import { canNotify, requestNotifications } from "@/lib/notify"
-import { minDataScript } from "@/lib/chains"
+import { minDataScript, replayPairs } from "@/lib/chains"
 import {
   CHAINS,
   WEB_CHAIN_IDS,
@@ -28,6 +29,8 @@ import {
   type Settings,
 } from "@/lib/wallet"
 import { cn } from "@/lib/utils"
+import { PERMISSIONS } from "@/lib/modules/types"
+import { MODULES, isEnabled, runsOn } from "@/modules"
 
 /** chains whose sends can carry an OP_RETURN their replay pair rejects (Bitcoin vs Blake) */
 const GUARDED = WEB_CHAIN_IDS.filter((c) => minDataScript(c) > 0)
@@ -57,6 +60,7 @@ export default function SettingsPage() {
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <NetworksCard />
+      <ModulesCard />
 
       <Card>
         <CardHeader>
@@ -100,7 +104,7 @@ export default function SettingsPage() {
             </div>
           </div>
           <Toggle
-            label={`${GUARDED.map((c) => CHAINS[c].label).join(" / ")}-only OP_RETURN replay guard on by default`}
+            label={`${GUARDED.map((c) => CHAINS[c].label).join(" / ")} replay guards on by default (OP_RETURN vs Blake, a coin eCash lacks vs eCash)`}
             checked={settings.replayGuard}
             onChange={(replayGuard) => save({ replayGuard })}
           />
@@ -191,7 +195,9 @@ function NetworksCard() {
           const features = [
             FAMILIES[def.family].label,
             def.unifiedSighash && "SIGHASH_UNIFIED",
-            def.replayPair && `replays ↔ ${CHAINS[def.replayPair].label}`,
+            def.replayLockTime && "nLockTime replay protection",
+            def.forkHeight && `fork at block ${def.forkHeight.toLocaleString()}`,
+            replayPairs(c).length > 0 && `replays ↔ ${replayPairs(c).map((p) => CHAINS[p].label).join(", ")}`,
             def.maxScript && `scripts ≤ ${def.maxScript} B`,
             typeof def.maxDataScript === "number" && `OP_RETURN ≤ ${def.maxDataScript} B`,
           ].filter(Boolean)
@@ -206,6 +212,7 @@ function NetworksCard() {
                     <span className="text-xs font-normal text-muted-foreground">{def.unit}</span>
                   </span>
                   <span className="text-xs text-muted-foreground">{features.join(" · ")}</span>
+                  {def.soon && <span className="text-xs text-muted-foreground">Soon: {forkCountdown(c, snapshots.btc?.height)}</span>}
                 </span>
                 <div className="flex gap-2">
                   <Button
@@ -220,7 +227,11 @@ function NetworksCard() {
                   <Button variant="outline" size="sm" onClick={() => setEditing(editing === c ? null : c)}>
                     Sources{src?.custom ? " · custom" : ""}
                   </Button>
-                  {c === active ? (
+                  {def.soon ? (
+                    <Button size="sm" variant="outline" disabled title={`Launches ${forkCountdown(c, snapshots.btc?.height)}`}>
+                      Soon
+                    </Button>
+                  ) : c === active ? (
                     <Button size="sm" variant="secondary" disabled>
                       <CheckIcon /> Selected
                     </Button>
@@ -238,6 +249,51 @@ function NetworksCard() {
             </div>
           )
         })}
+      </CardContent>
+    </Card>
+  )
+}
+
+/** Turn modules on or off, with what each one may do. Module code runs sandboxed; this list is all it can reach. */
+function ModulesCard() {
+  const { settings, chain } = useWallet()
+  const toggle = async (id: string, on: boolean) => {
+    try {
+      await api("/api/settings", { modules: { ...settings.modules, [id]: on } })
+    } catch (e) {
+      toast.error("Couldn't change the module", { description: (e as Error).message })
+    }
+  }
+  return (
+    <Card id="modules" className="scroll-mt-20 lg:col-span-2">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <PuzzleIcon className="size-4" /> Modules
+        </CardTitle>
+        <CardDescription>
+          Pages, dashboard cards and transaction types. Each runs isolated from the wallet: no keys, passwords or other data, only the permissions
+          listed, and every transaction it proposes is yours to review and sign.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        {MODULES.map((m) => (
+          <div key={m.id} className="flex flex-col gap-2 rounded-lg border p-4">
+            <div className="flex items-start justify-between gap-3">
+              <span className="flex min-w-0 flex-col gap-1">
+                <span className="font-medium">{m.name}</span>
+                <span className="text-xs text-muted-foreground">{m.description}</span>
+              </span>
+              <Switch checked={isEnabled(m, settings.modules)} onCheckedChange={(on) => toggle(m.id, on)} aria-label={`${m.name} on/off`} />
+            </div>
+            <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">
+              <span>
+                {m.chains === "all" ? "Every network" : m.chains.map((c) => CHAINS[c].label).join(", ")}
+                {!runsOn(m, chain) && ` · not on ${CHAINS[chain].label}`} · {m.views.map((v) => `${v.title} (${v.slot})`).join(", ")}
+              </span>
+              <span>Can: {[...m.permissions.map((p) => PERMISSIONS[p]), ...(m.hosts?.length ? [`reach ${m.hosts.join(", ")}`] : [])].join(" · ") || "nothing beyond its own views"}</span>
+            </div>
+          </div>
+        ))}
       </CardContent>
     </Card>
   )

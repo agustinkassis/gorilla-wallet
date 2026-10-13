@@ -5,7 +5,7 @@ import { bytesToHex, concatBytes } from "@noble/hashes/utils.js"
 import { createBase58check } from "@scure/base"
 import { CHAINS, networkOf, type Chain, type Family } from "@/lib/chains"
 
-export { CHAINS, CHAIN_IDS, WEB_CHAIN_IDS, FAMILIES, familyOf, isChain, syncedChains, type Chain, type Family } from "@/lib/chains"
+export { CHAINS, CHAIN_IDS, WEB_CHAIN_IDS, FAMILIES, familyOf, isChain, replayPairs, syncedChains, type Chain, type Family } from "@/lib/chains"
 
 /** Addresses shown on the dashboard (receive chain). Discovery goes further, up to the gap limit. */
 export const ADDRESS_COUNT = 10
@@ -60,7 +60,7 @@ export type FeePreset = keyof Fees
 /** Where a chain's data comes from; an empty or missing list means the built-in defaults. */
 export type ChainSources = { electrum?: string[]; mempool?: string[] }
 export type Settings = {
-  /** the selected network (navbar); its replay pair, if any, syncs along */
+  /** the selected network (navbar); its replay pairs, if any, sync along */
   chain: Chain
   /** networks left out of the navbar switcher (the selected one always shows) */
   hidden: Chain[]
@@ -68,10 +68,12 @@ export type Settings = {
   sound: boolean
   notifications: boolean
   feePreset: FeePreset
-  /** BTC sends: OP_RETURN replay guard on by default */
+  /** BTC sends: replay guards (OP_RETURN vs Blake, a coin eCash lacks) on by default */
   replayGuard: boolean
   gapReceive: number
   gapChange: number
+  /** module id → on/off (Settings → Modules); missing: the manifest's default */
+  modules: Record<string, boolean>
 }
 export const DEFAULT_SETTINGS: Settings = {
   chain: "btc",
@@ -83,6 +85,7 @@ export const DEFAULT_SETTINGS: Settings = {
   replayGuard: false,
   gapReceive: 20,
   gapChange: 10,
+  modules: {},
 }
 
 export type StreamMessage =
@@ -172,10 +175,8 @@ export const sumBalances = (s?: Snapshot) =>
 /** Snapshot has real data (kept while reconnecting, so last known values stay visible). */
 export const hasData = (s?: Snapshot): s is Snapshot => !!s?.synced
 
-/** Outpoints unspent on a chain and on its replay pair: pre-fork coins whose spend can be replayed across. */
-export function sharedOutpoints(snapshots: Partial<Record<Chain, Snapshot>>, chain: Chain) {
-  const pair = CHAINS[chain].replayPair
-  if (!pair) return new Set<string>()
+/** Outpoints unspent on a chain and on a replay pair of it: pre-fork coins whose spend can be replayed across. */
+export function sharedOutpoints(snapshots: Partial<Record<Chain, Snapshot>>, chain: Chain, pair: Chain) {
   const other = new Set((snapshots[pair]?.utxos ?? []).map((u) => `${u.txid}:${u.vout}`))
   return new Set((snapshots[chain]?.utxos ?? []).map((u) => `${u.txid}:${u.vout}`).filter((o) => other.has(o)))
 }

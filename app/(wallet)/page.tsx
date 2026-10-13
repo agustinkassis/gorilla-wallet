@@ -14,6 +14,8 @@ import { UnitLabel, useUnit } from "@/components/units"
 import { useWallet } from "@/components/wallet-provider"
 import { CHAINS, formatAmount, hasData, sumBalances, type Chain } from "@/lib/wallet"
 import { cn } from "@/lib/utils"
+import { ModuleFrame } from "@/components/module-frame"
+import { viewsFor } from "@/modules"
 
 function BalanceCard({ chain }: { chain: Chain }) {
   const { snapshots, live, flash } = useWallet()
@@ -99,7 +101,8 @@ function Amount({ sats, loading }: { sats?: number; loading: boolean }) {
 }
 
 export default function Dashboard() {
-  const { addresses, path, snapshots, chains, chain } = useWallet()
+  const { addresses, path, snapshots, chains, chain, settings } = useWallet()
+  const widgets = viewsFor(settings.modules, chain, "dashboard")
   const infoOf = (addr: string) => snapshots[chain]?.addresses.find((a) => a.address === addr)
   const total = (chain: Chain, addr: string) => {
     const b = snapshots[chain]?.addresses.find((a) => a.address === addr)
@@ -113,6 +116,14 @@ export default function Dashboard() {
           <BalanceCard key={c} chain={c} />
         ))}
       </div>
+
+      {widgets.length > 0 && (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {widgets.map(({ module, view }) => (
+            <ModuleFrame key={`${module.id}:${view.id}:${chain}`} module={module} view={view} />
+          ))}
+        </div>
+      )}
 
       <Card>
         <CardHeader>
