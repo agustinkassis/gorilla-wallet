@@ -58,8 +58,8 @@ type WalletContext = {
   /** the selected network (navbar) */
   chain: Chain
   family: Family
-  /** its replay pair while synced along (Bitcoin ↔ Blake): replay tools and the OP_RETURN guard */
-  pair?: Chain
+  /** its replay pairs, synced along (Bitcoin ↔ Blake, eCash): replay tools and replay guards */
+  pairs: Chain[]
   /** the selected wallet's account on the network's family; undefined until enabled (see Gate) */
   account?: Account
   xpub?: string
@@ -68,7 +68,7 @@ type WalletContext = {
   fingerprint?: number
   /** first receive addresses, derived in the browser from the xpub */
   addresses: string[]
-  /** the selected wallet's snapshots: the selected network and its replay pair */
+  /** the selected wallet's snapshots: the selected network and its replay pairs */
   snapshots: ChainSnapshots
   /** every wallet's snapshots (wallet switcher balances) */
   allSnapshots: Record<string, ChainSnapshots>
@@ -207,7 +207,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const chain = value.settings.chain
   const family = familyOf(chain)
   const synced = syncedChains(chain)
-  const pair = synced[1]
+  const pairs = synced.slice(1)
   const account = wallet?.accounts[family]
   // switching networks hides the previous one at once, even before the server drops it
   const snapshots = Object.fromEntries(Object.entries(wallet ? (value.all[wallet.id] ?? {}) : {}).filter(([c]) => synced.includes(c as Chain)))
@@ -223,7 +223,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         watchOnly: !!wallet?.watchOnly,
         chain,
         family,
-        pair,
+        pairs,
         account,
         xpub: account?.xpub,
         path: account?.path,

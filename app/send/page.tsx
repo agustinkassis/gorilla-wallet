@@ -17,11 +17,13 @@ import {
   DownloadIcon,
   ExternalLinkIcon,
   FingerprintIcon,
+  LayersIcon,
   Loader2Icon,
   PenLineIcon,
   PlusIcon,
   RadioTowerIcon,
   ShieldCheckIcon,
+  SplitIcon,
   SnowflakeIcon,
   Trash2Icon,
 } from "lucide-react"
@@ -40,7 +42,7 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { PsbtQr, QrImage } from "@/components/qr"
 import { QrScanner, type Scanned } from "@/components/qr-scanner"
-import { minDataScript } from "@/lib/chains"
+import { REPLAY_LOCKTIME, dataCapPair, minDataScript, replayPairs } from "@/lib/chains"
 import { RecipientAddress } from "@/components/recipient-address"
 import { copy, shorten } from "@/components/site-header"
 import { useWallet } from "@/components/wallet-provider"
@@ -55,10 +57,13 @@ import {
   feeAt,
   importSigned,
   opReturnScript,
+  parseDepositAddress,
   parseTxHex,
   planTx,
   rbfFee,
+  sentBy,
   type Coin,
+  type Ctip,
   type FeePolicy,
   type TxPlan,
 } from "@/lib/tx"
@@ -85,7 +90,8 @@ const PRESETS: { key: FeePreset; label: string }[] = [
   { key: "economyFee", label: "Economy" },
 ]
 
-type Mode = { kind: "send" } | { kind: "bump"; txid: string } | { kind: "cpfp"; outpoint: string }
+type Mode = { kind: "send" } | { kind: "deposit" } | { kind: "bump"; txid: string } | { kind: "cpfp"; outpoint: string }
+type Sidechain = { slot: number; title: string; ctip: Ctip | null }
 type Signed = { hex: string; txid: string; fee: number; vsize: number }
 type Step = { name: "edit" } | { name: "review"; psbt: Uint8Array; plan: TxPlan } | { name: "signed"; signed: Signed } | { name: "sent"; txid: string }
 
@@ -112,14 +118,16 @@ function Send() {
   const params = useSearchParams()
   const router = useRouter()
   const wallet = useWallet()
+  // the selected network (navbar); its replay pairs only inform the replay guards
+  const chain = wallet.chain
+  const snap = wallet.snapshots[chain]
   const mode: Mode = params.get("bump")
     ? { kind: "bump", txid: params.get("bump")! }
     : params.get("cpfp")
       ? { kind: "cpfp", outpoint: params.get("cpfp")! }
-      : { kind: "send" }
-  // the selected network (navbar); its replay pair only informs the replay guard
-  const chain = wallet.chain
-  const snap = wallet.snapshots[chain]
+      : params.get("deposit") && CHAINS[chain].drivechain
+        ? { kind: "deposit" }
+        : { kind: "send" }
 
   if (!hasData(snap) || wallet.fingerprint === undefined || !wallet.xpub) return <Skeleton className="h-96 w-full rounded-xl" />
 
@@ -127,14 +135,27 @@ function Send() {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         {mode.kind === "send" ? (
-          <span />
+          CHAINS[chain].drivechain ? (
+            <Button variant="outline" size="sm" onClick={() => router.push("/send?deposit=1")}>
+              <LayersIcon /> Deposit to a sidechain
+            </Button>
+          ) : (
+            <span />
+          )
         ) : (
           <Button variant="ghost" size="sm" onClick={() => router.push("/send")}>
             <ArrowLeftIcon /> New payment
           </Button>
         )}
         <span className="text-sm text-muted-foreground">
-          {mode.kind === "bump" ? "Bump fee (RBF)" : mode.kind === "cpfp" ? "Accelerate with CPFP" : "New payment"} on {CHAINS[chain].label}
+          {mode.kind === "bump"
+            ? "Bump fee (RBF)"
+            : mode.kind === "cpfp"
+              ? "Accelerate with CPFP"
+              : mode.kind === "deposit"
+                ? "Sidechain deposit (BIP300)"
+                : "New payment"}{" "}
+          on {CHAINS[chain].label}
         </span>
       </div>
       {/* keyed so switching chain or mode resets the whole form */}
@@ -151,7 +172,9 @@ function SendForm({ chain, snap, mode, preselect }: { chain: Chain; snap: Snapsh
   // a replacement can't spend outputs of the tx it replaces: hide them in bump mode
   const replacing = mode.kind === "bump" ? mode.txid : null
   const coins = useMemo(() => coinsOf(snap).filter((c) => c.coin.txid !== replacing), [snap, replacing])
-  const shared = useMemo(() => sharedOutpoints(wallet.snapshots, chain), [wallet.snapshots, chain])
+  const pairs = wallet.pairs
+  // per replay pair, our coins unspent there too: a tx spending only those can be replayed there
+  const shared = useMemo(() => new Map(replayPairs(chain).map((p) => [p, sharedOutpoints(wallet.snapshots, chain, p)])), [wallet.snapshots, chain])
   const changeAddress = (nextUnused(wallet.snapshots, 1) ?? snap.addresses.find((a) => a.change === 1))?.address ?? ""
 
   const [recipients, setRecipients] = useState([{ address: "", amount: "" }])
@@ -169,10 +192,13 @@ function SendForm({ chain, snap, mode, preselect }: { chain: Chain; snap: Snapsh
   const [manual, setManual] = useState<Set<string> | null>(preselect ? new Set(preselect.split(",")) : null)
   const [preset, setPreset] = useState<FeePreset | "custom">(wallet.settings.feePreset)
   const [customRate, setCustomRate] = useState("")
-  // replay guard: an OP_RETURN too big for the replay pair (Bitcoin ≥ 84 bytes, Blake allows ≤ 83) pins the tx here
-  const pair = wallet.pair
-  const guardable = !!pair && minDataScript(chain) > 0
+  // replay guards. Blake caps OP_RETURNs (≤ 83 bytes): a bigger one (Bitcoin ≥ 84) pins the tx here.
+  const dataPair = dataCapPair(chain)
+  const guardable = !!dataPair
   const [guard, setGuard] = useState(guardable && wallet.settings.replayGuard)
+  // eCash has no marker a Bitcoin tx can carry: spending one coin it lacks (post-fork, or split there) makes it invalid there
+  const coinPair = pairs.find((p) => CHAINS[p].replayLockTime)
+  const [coinGuard, setCoinGuard] = useState(!!coinPair && wallet.settings.replayGuard)
   const [message, setMessage] = useState("")
   const [step, setStep] = useState<Step>({ name: "edit" })
   const [busy, setBusy] = useState(false)
@@ -180,6 +206,28 @@ function SendForm({ chain, snap, mode, preselect }: { chain: Chain; snap: Snapsh
   // Fee-bump / CPFP context loaded from the chain
   const [bump, setBump] = useState<{ inputs: Coin[]; recipients: { address: string; amount: number }[]; data?: Uint8Array; fee: number; vsize: number } | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
+  // deposit: the active sidechains and their treasuries, from the chain's BIP300 enforcer
+  const [sidechains, setSidechains] = useState<Sidechain[] | null>(null)
+
+  useEffect(() => {
+    if (mode.kind !== "deposit") return
+    let live = true
+    api<{ sidechains: Sidechain[] }>("/api/sidechains", { chain })
+      .then((r) => live && setSidechains(r.sidechains.sort((a, b) => a.slot - b.slot)))
+      .catch((e) => live && setLoadError((e as Error).message))
+    return () => {
+      live = false
+    }
+  }, [mode.kind, chain])
+  const depositTo = (() => {
+    if (mode.kind !== "deposit") return null
+    try {
+      const { slot, address } = parseDepositAddress(recipients[0].address)
+      return { slot, address, sidechain: sidechains?.find((s) => s.slot === slot) }
+    } catch {
+      return null
+    }
+  })()
 
   useEffect(() => {
     if (mode.kind !== "bump") return
@@ -253,7 +301,7 @@ function SendForm({ chain, snap, mode, preselect }: { chain: Chain; snap: Snapsh
         if (!cpfpCoin) throw new PlanError("That coin is no longer unconfirmed in this wallet")
         if (cpfpParent?.fee == null) throw new PlanError("Parent fee unknown yet")
         plan = planTx({ chain, recipients: [{ address: changeAddress, amount: 0 }], sendMax: true, required: [cpfpCoin], fee: policy, changeAddress })
-      } else if (mode.kind === "send" || bump) {
+      } else if (mode.kind === "send" || mode.kind === "deposit" || bump) {
         const list = recipients.map((r, i) => {
           const amount = sendMax && i === 0 ? 0 : parseAmount(r.amount, unit)
           if (amount === null) throw new PlanError("Enter a valid amount")
@@ -261,6 +309,20 @@ function SendForm({ chain, snap, mode, preselect }: { chain: Chain; snap: Snapsh
         })
         // RBF: the original's coins are always spent, so the new tx conflicts with (replaces) the stuck one
         const required = [...locked, ...(manualCoins ?? [])]
+        // eCash guard: spend a coin eCash lacks (needs its UTXOs to know which)
+        // ponytail: "lacks" is today's view; a post-fork coin whose parent gets replayed there later is shared again
+        const guarding = coinPair && coinGuard && mode.kind === "send"
+        if (guarding && !hasData(wallet.snapshots[coinPair]))
+          throw new PlanError(`Waiting for ${CHAINS[coinPair].label} to sync to pick a coin it lacks (or turn off its replay protection)`)
+        // deposit: only to an active slot (an inactive one's output is anyone-can-spend), spending its current treasury
+        let deposit: { ctip: Ctip | null } | undefined
+        if (mode.kind === "deposit") {
+          const { slot } = parseDepositAddress(recipients[0].address)
+          if (!sidechains) throw new PlanError(`Loading ${meta.label} sidechains…`)
+          const sidechain = sidechains.find((s) => s.slot === slot)
+          if (!sidechain) throw new PlanError(`Sidechain slot ${slot} isn't active on ${meta.label}: a deposit there would be lost`)
+          deposit = { ctip: sidechain.ctip }
+        }
         plan = planTx({
           chain,
           recipients: list,
@@ -270,6 +332,8 @@ function SendForm({ chain, snap, mode, preselect }: { chain: Chain; snap: Snapsh
           fee: policy,
           changeAddress,
           data: mode.kind === "bump" ? bump?.data : data,
+          guard: guarding ? { coins: [...(manualCoins ?? []), ...candidates].filter((c) => !shared.get(coinPair)!.has(outpoint(c))), pair: coinPair } : undefined,
+          deposit,
         })
       }
     } catch (e) {
@@ -279,8 +343,18 @@ function SendForm({ chain, snap, mode, preselect }: { chain: Chain; snap: Snapsh
 
   const chosen = new Set([...lockedOps, ...(plan?.inputs ?? manualCoins ?? []).map(outpoint)])
   const bumpShort = mode.kind === "bump" && !plan && !!planError && /Insufficient|dust/.test(planError)
-  const spendsShared = [...chosen].some((o) => shared.has(o))
-  const sending = plan ? plan.outputs.filter((o) => o.kind === "recipient").reduce((s, o) => s + o.amount, 0) : 0
+  // replayable on a pair when every input is unspent there too and nothing in the tx is invalid there
+  const pinned = (p: Chain) => !!meta.unifiedSighash || !!meta.replayLockTime || (p === dataPair && !!(data ?? (mode.kind === "bump" && bump?.data)))
+  const replayableOn = pairs.filter((p) => !pinned(p) && chosen.size > 0 && [...chosen].every((o) => shared.get(p)!.has(o)))
+  // eCash: our coins still unspent on Bitcoin too; spending them here first splits them (Bitcoin spends then can't replay here)
+  const splittable = meta.replayLockTime ? coins.filter((c) => !c.frozen && pairs.some((p) => shared.get(p)!.has(outpoint(c.coin)))) : []
+  const splitTo = nextUnused(wallet.snapshots, 0)?.address
+  const split = () => {
+    setRecipients([{ address: splitTo!, amount: "" }])
+    setSendMax(true)
+    setManual(new Set(splittable.map((c) => outpoint(c.coin))))
+  }
+  const sending = plan ? sentBy(plan) : 0
   const feeShare = plan && sending ? plan.fee / sending : 0
   const editable = step.name === "edit"
 
@@ -296,8 +370,9 @@ function SendForm({ chain, snap, mode, preselect }: { chain: Chain; snap: Snapsh
     if (!plan) return
     setBusy(true)
     try {
-      // full parent txs (nonWitnessUtxo) for hardware/external signers; optional
-      const parents = await api<Record<string, string>>("/api/rawtx", { chain, txids: [...new Set(plan.inputs.map((c) => c.txid))] }).catch(() => ({}))
+      // full parent txs (nonWitnessUtxo): optional for hardware/external signers, required for a sidechain's treasury
+      const txids = [...new Set([...plan.inputs.map((c) => c.txid), ...(plan.deposit?.ctip ? [plan.deposit.ctip.txid] : [])])]
+      const parents = await api<Record<string, string>>("/api/rawtx", { chain, txids }).catch(() => ({}))
       const tx = buildPsbt(plan, {
         chain,
         xpub: wallet.xpub!,
@@ -331,6 +406,9 @@ function SendForm({ chain, snap, mode, preselect }: { chain: Chain; snap: Snapsh
     try {
       const { txid } = await api<{ txid: string }>("/api/broadcast", { chain, hex: signed.hex })
       setStep({ name: "sent", txid })
+      const sidechain = depositTo?.sidechain
+      if (sidechain && wallet.wallet)
+        void api("/api/labels", { walletId: wallet.wallet.id, chain, type: "tx", ref: txid, label: `Deposit to ${sidechain.title} (sidechain ${sidechain.slot})` }).catch(() => {})
       toast.success(`${meta.label} transaction broadcast`, { description: shorten(txid) })
     } catch (e) {
       toast.error("Broadcast failed", { description: (e as Error).message })
@@ -345,23 +423,37 @@ function SendForm({ chain, snap, mode, preselect }: { chain: Chain; snap: Snapsh
         {mode.kind !== "cpfp" && (
           <Card>
             <CardHeader>
-              <CardTitle>Recipients</CardTitle>
+              <CardTitle>{mode.kind === "deposit" ? "Sidechain deposit" : "Recipients"}</CardTitle>
               <CardDescription>
                 {mode.kind === "bump"
                   ? "Prefilled from the stuck transaction. Change amounts, add recipients, or use Max to take the higher fee from the payment."
-                  : "Batch several payments into one transaction, or sweep with Max."}
+                  : mode.kind === "deposit"
+                    ? `Moves ${meta.unit} into a BIP300 sidechain: paste a deposit address from the sidechain's wallet (s9_…), which names its slot and carries a checksum.`
+                    : "Batch several payments into one transaction, or sweep with Max."}
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               {recipients.map((r, i) => (
                 <div key={i} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_180px_auto]">
-                  <RecipientAddress
-                    chain={chain}
-                    index={i}
-                    disabled={!editable}
-                    value={r.address}
-                    onChange={(address) => setRecipients(recipients.map((x, j) => (j === i ? { ...x, address } : x)))}
-                  />
+                  {mode.kind === "deposit" ? (
+                    <Input
+                      disabled={!editable}
+                      spellCheck={false}
+                      placeholder="s9_…_checksum"
+                      value={r.address}
+                      onChange={(e) => setRecipients([{ ...r, address: e.target.value }])}
+                      className="font-mono text-xs"
+                      aria-label="Sidechain deposit address"
+                    />
+                  ) : (
+                    <RecipientAddress
+                      chain={chain}
+                      index={i}
+                      disabled={!editable}
+                      value={r.address}
+                      onChange={(address) => setRecipients(recipients.map((x, j) => (j === i ? { ...x, address } : x)))}
+                    />
+                  )}
                   <div className="relative">
                     <Input
                       disabled={!editable || (sendMax && i === 0)}
@@ -393,18 +485,42 @@ function SendForm({ chain, snap, mode, preselect }: { chain: Chain; snap: Snapsh
                   </div>
                 </div>
               ))}
-              <Button
-                variant="ghost"
-                size="sm"
-                className="self-start"
-                disabled={!editable}
-                onClick={() => {
-                  setSendMax(false)
-                  setRecipients([...recipients, { address: "", amount: "" }])
-                }}
-              >
-                <PlusIcon /> Add recipient
-              </Button>
+              {mode.kind === "deposit" ? (
+                <div className="flex flex-col gap-2 text-xs text-muted-foreground">
+                  {depositTo && (
+                    <p className={depositTo.sidechain || !sidechains ? "text-foreground" : "text-amber-600 dark:text-amber-400"}>
+                      To {depositTo.sidechain ? `${depositTo.sidechain.title} (slot ${depositTo.slot})` : `slot ${depositTo.slot}`}
+                      {sidechains && !depositTo.sidechain && `, not active on ${meta.label}`} ·{" "}
+                      <span className="font-mono break-all">{depositTo.address}</span>
+                    </p>
+                  )}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span>Active on {meta.label}:</span>
+                    {sidechains ? (
+                      sidechains.map((s) => (
+                        <Badge key={s.slot} variant="outline">
+                          {s.title} · {s.slot}
+                        </Badge>
+                      ))
+                    ) : (
+                      <Skeleton className="h-5 w-40" />
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="self-start"
+                  disabled={!editable}
+                  onClick={() => {
+                    setSendMax(false)
+                    setRecipients([...recipients, { address: "", amount: "" }])
+                  }}
+                >
+                  <PlusIcon /> Add recipient
+                </Button>
+              )}
             </CardContent>
           </Card>
         )}
@@ -496,7 +612,9 @@ function SendForm({ chain, snap, mode, preselect }: { chain: Chain; snap: Snapsh
                           </Badge>
                         )}
                         {coin.height <= 0 && !isLocked && <Badge variant="outline" className="text-amber-600 dark:text-amber-400">Unconfirmed</Badge>}
-                        {shared.has(op) && <Badge variant="outline">On both chains</Badge>}
+                        {pairs.filter((p) => shared.get(p)!.has(op)).map((p) => (
+                          <Badge key={p} variant="outline">Also on {CHAINS[p].label}</Badge>
+                        ))}
                         {uneconomical && <Badge variant="outline" className="text-rose-600 dark:text-rose-400">Uneconomical</Badge>}
                       </div>
                       <div className="truncate text-xs text-muted-foreground">{label ?? `${coin.change ? "change" : "receive"} #${coin.index}`}</div>
@@ -519,9 +637,9 @@ function SendForm({ chain, snap, mode, preselect }: { chain: Chain; snap: Snapsh
                 <Switch checked={guard} disabled={!editable} onCheckedChange={setGuard} aria-label={`${meta.label}-only OP_RETURN`} />
               </CardTitle>
               <CardDescription>
-                Adds an on-chain message as an OP_RETURN of at least {minDataScript(chain)} bytes. {CHAINS[pair!].label}&apos;s consensus rejects
+                Adds an on-chain message as an OP_RETURN of at least {minDataScript(chain)} bytes. {CHAINS[dataPair!].label}&apos;s consensus rejects
                 OP_RETURNs over {minDataScript(chain) - 1} bytes, so this transaction can only ever confirm on {meta.label} and can&apos;t be replayed to move
-                your {CHAINS[pair!].label} coins. Needs a relay that accepts large OP_RETURNs (Bitcoin Core 30+, mempool.space).
+                your {CHAINS[dataPair!].label} coins. Needs a relay that accepts large OP_RETURNs (Bitcoin Core 30+, mempool.space).
               </CardDescription>
             </CardHeader>
             {guard && (
@@ -536,6 +654,24 @@ function SendForm({ chain, snap, mode, preselect }: { chain: Chain; snap: Snapsh
                 <OpReturnInfo message={message} chain={chain} />
               </CardContent>
             )}
+          </Card>
+        )}
+
+        {coinPair && mode.kind === "send" && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between gap-2">
+                <span className="flex items-center gap-2">
+                  <ShieldCheckIcon className={cn("size-4", CHAINS[coinPair].text)} /> Not replayable on {CHAINS[coinPair].label}
+                </span>
+                <Switch checked={coinGuard} disabled={!editable} onCheckedChange={setCoinGuard} aria-label={`Not replayable on ${CHAINS[coinPair].label}`} />
+              </CardTitle>
+              <CardDescription>
+                eCash&apos;s replay protection (nLockTime {REPLAY_LOCKTIME}) only marks eCash transactions; nothing marks a {meta.label} one. So this
+                spends at least one coin {CHAINS[coinPair].label} doesn&apos;t have (received after its fork at block{" "}
+                {CHAINS[coinPair].forkHeight?.toLocaleString()}, or already split there), and {CHAINS[coinPair].label} rejects the whole transaction.
+              </CardDescription>
+            </CardHeader>
           </Card>
         )}
       </div>
@@ -597,7 +733,15 @@ function SendForm({ chain, snap, mode, preselect }: { chain: Chain; snap: Snapsh
             {plan ? (
               <>
                 <Row label="Inputs" value={`${plan.inputs.length} coin${plan.inputs.length === 1 ? "" : "s"} · ${formatAmount(plan.inputs.reduce((s, c) => s + c.value, 0), unit)}`} />
-                {mode.kind !== "cpfp" && <Row label="Sending" value={amountText(sending, chain, unit)} />}
+                {mode.kind !== "cpfp" && <Row label={plan.deposit ? "Depositing" : "Sending"} value={amountText(sending, chain, unit)} />}
+                {plan.deposit && (
+                  <Row
+                    label="Treasury"
+                    value={
+                      plan.deposit.ctip ? `${formatAmount(plan.deposit.ctip.value, unit)} → ${formatAmount(plan.deposit.ctip.value + sending, unit)}` : "first deposit"
+                    }
+                  />
+                )}
                 <Row
                   label="Change"
                   value={(() => {
@@ -641,29 +785,46 @@ function SendForm({ chain, snap, mode, preselect }: { chain: Chain; snap: Snapsh
           </CardContent>
         </Card>
 
-        {meta.unifiedSighash ? (
+        {meta.unifiedSighash || meta.replayLockTime ? (
           <Alert>
             <ShieldCheckIcon className={meta.text} />
             <AlertTitle>Replay-protected</AlertTitle>
             <AlertDescription>
-              Signed with SIGHASH_UNIFIED (0x21), which {pair ? CHAINS[pair].label : "other chains"} rejects, so this only moves {meta.label} coins.
-              External signers need SIGHASH_UNIFIED support (Bitcoin Knots 29.4.1+).
+              {meta.unifiedSighash
+                ? `Signed with SIGHASH_UNIFIED (0x21), which ${pairs.map((p) => CHAINS[p].label).join(" and ") || "other chains"} rejects, so this only moves ${meta.label} coins. External signers need SIGHASH_UNIFIED support (Bitcoin Knots 29.4.1+).`
+                : `nLockTime ${REPLAY_LOCKTIME.toLocaleString()} is final on ${meta.label}, but Bitcoin reads it as a block ~500M blocks away and never accepts it, so this only moves ${meta.label} coins.`}
             </AlertDescription>
           </Alert>
         ) : (
-          pair &&
-          spendsShared &&
-          !guard &&
-          !(mode.kind === "bump" && bump?.data) && (
-            <Alert className="border-amber-500/40">
+          replayableOn.map((p) => (
+            <Alert key={p} className="border-amber-500/40">
               <AlertTriangleIcon className="text-amber-600 dark:text-amber-400" />
-              <AlertTitle>Replayable on {CHAINS[pair].label}</AlertTitle>
+              <AlertTitle>Replayable on {CHAINS[p].label}</AlertTitle>
               <AlertDescription>
-                These coins also exist on {CHAINS[pair].label}. Anyone can rebroadcast this transaction there and move your {CHAINS[pair].label} coins
-                too.{guardable ? ` Turn on the ${meta.label}-only OP_RETURN, or move the ${CHAINS[pair].label} coins first.` : ""}
+                These coins also exist on {CHAINS[p].label}. Anyone can rebroadcast this transaction there and move your {CHAINS[p].label} coins too.
+                {p === dataPair && ` Turn on the ${meta.label}-only OP_RETURN, or move the ${CHAINS[p].label} coins first.`}
+                {p === coinPair && ` Turn on "Not replayable on ${CHAINS[p].label}", or split the coins there first.`}
               </AlertDescription>
             </Alert>
-          )
+          ))
+        )}
+
+        {splittable.length > 0 && mode.kind === "send" && (
+          <Alert>
+            <SplitIcon className={meta.text} />
+            <AlertTitle>
+              {splittable.length} coin{splittable.length === 1 ? "" : "s"} still on {pairs.map((p) => CHAINS[p].label).join(" and ")} too
+            </AlertTitle>
+            <AlertDescription className="flex flex-col gap-2">
+              <span>
+                Split them: send them to yourself here first. Once they&apos;re spent on {meta.label}, a {pairs.map((p) => CHAINS[p].label).join(" or ")}{" "}
+                transaction spending them can&apos;t be replayed here. Wait for a few confirmations before relying on it.
+              </span>
+              <Button size="sm" variant="outline" className="self-start" disabled={!editable || !splitTo} onClick={split}>
+                <SplitIcon /> Split coins
+              </Button>
+            </AlertDescription>
+          </Alert>
         )}
 
         {wallet.watchOnly && !wallet.fingerprint && wallet.wallet && (
@@ -772,11 +933,11 @@ function TxDialog({
           </DialogTitle>
           <DialogDescription>
             {step.name === "review" &&
-              `${step.plan.inputs.length} input${step.plan.inputs.length === 1 ? "" : "s"} · ${amountText(
-                step.plan.outputs.filter((o) => o.kind === "recipient").reduce((s, o) => s + o.amount, 0),
+              `${step.plan.inputs.length} input${step.plan.inputs.length === 1 ? "" : "s"}${step.plan.deposit ? " + the sidechain treasury" : ""} · ${amountText(
+                sentBy(step.plan),
                 chain,
                 unit,
-              )} · fee ${step.plan.fee.toLocaleString()} sats (${(step.plan.fee / step.plan.vsize).toFixed(1)} sat/vB). ${watchOnly ? "Watch-only wallet: sign it on the device that holds the keys, then bring it back below." : "Scan with a signing wallet, or let this wallet's backend sign it."}`}
+              )}${step.plan.deposit ? ` to sidechain ${step.plan.deposit.slot}` : ""} · fee ${step.plan.fee.toLocaleString()} sats (${(step.plan.fee / step.plan.vsize).toFixed(1)} sat/vB). ${watchOnly ? "Watch-only wallet: sign it on the device that holds the keys, then bring it back below." : "Scan with a signing wallet, or let this wallet's backend sign it."}`}
             {step.name === "signed" &&
               `${step.signed.vsize} vB · fee ${step.signed.fee.toLocaleString()} sats · txid ${shorten(step.signed.txid)}. Nothing is sent until you broadcast.`}
             {step.name === "sent" && "The network accepted the transaction. It will confirm in an upcoming block."}
@@ -995,7 +1156,7 @@ function OpReturnInfo({ message, chain }: { message: string; chain: Chain }) {
   return (
     <p className={cn("text-xs", error ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground")}>
       {error ||
-        `${bytes} / ${OP_RETURN_MAX_DATA} bytes${bytes < pad ? `, padded with ${pad - bytes} zero bytes` : ""} · OP_RETURN script ${script} bytes (${CHAINS[CHAINS[chain].replayPair!].label} max ${pad + 2}) · +${script + 9} vB`}
+        `${bytes} / ${OP_RETURN_MAX_DATA} bytes${bytes < pad ? `, padded with ${pad - bytes} zero bytes` : ""} · OP_RETURN script ${script} bytes (${CHAINS[dataCapPair(chain)!].label} max ${pad + 2}) · +${script + 9} vB`}
     </p>
   )
 }

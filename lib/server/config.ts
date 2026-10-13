@@ -34,4 +34,9 @@ export const config = {
       mempool: pick(settings.sources[chain]?.mempool, env(`MEMPOOL_${id}_URL`), CHAINS[chain].mempool).map((u) => u.replace(/\/+$/, "")),
     }
   },
+  /** BIP300 enforcers for sidechain deposits: .env (PECX_ENFORCER, comma-separated), else the chain's defaults */
+  enforcers(chain: Chain) {
+    const env = list(process.env[`${chain.toUpperCase()}_ENFORCER`] ?? "")
+    return (env.length ? env : (CHAINS[chain].drivechain?.enforcer ?? [])).map((u) => u.replace(/\/+$/, ""))
+  },
 }

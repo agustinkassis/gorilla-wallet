@@ -8,6 +8,7 @@ import Link from "next/link"
 import { BellIcon, ChevronDownIcon, CopyIcon, LogOutIcon, MonitorIcon, MoonIcon, SlidersHorizontalIcon, SunIcon, ZapIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -29,12 +30,23 @@ import { WatchOnlyBadge } from "@/components/wallet-switcher"
 import { api } from "@/lib/api"
 import { canNotify, requestNotifications } from "@/lib/notify"
 import { cn } from "@/lib/utils"
-import { CHAINS, WEB_CHAIN_IDS, isChain, pendingIncoming } from "@/lib/wallet"
+import { CHAINS, WEB_CHAIN_IDS, isChain, pendingIncoming, type Chain } from "@/lib/wallet"
 
 export const shorten = (s: string, n = 8) => (s.length > n * 2 + 1 ? `${s.slice(0, n)}…${s.slice(-n)}` : s)
 
 export function copy(text: string, label = "Copied") {
   navigator.clipboard.writeText(text).then(() => toast.success(label))
+}
+
+/** Until a soon chain forks, from Bitcoin's tip at 10-minute blocks: "2,485 blocks · ~17 d (Oct 31)". */
+export function forkCountdown(chain: Chain, btcHeight?: number) {
+  const fork = CHAINS[chain].forkHeight!
+  if (!btcHeight) return `at block ${fork.toLocaleString()}`
+  const left = fork - btcHeight
+  if (left <= 0) return `forked at block ${fork.toLocaleString()}, waiting for its servers`
+  const min = left * 10
+  const eta = new Date(Date.now() + min * 60_000).toLocaleString(undefined, { month: "short", day: "numeric", ...(min < 2880 && { hour: "numeric", minute: "2-digit" }) })
+  return `${left.toLocaleString()} block${left === 1 ? "" : "s"} · ~${min >= 2880 ? `${Math.round(min / 1440)} d` : min >= 120 ? `${Math.round(min / 60)} h` : `${min} min`} (${eta})`
 }
 
 export function SiteHeader() {
@@ -101,11 +113,12 @@ export function SiteHeader() {
   )
 }
 
-/** The selected network, one at a time (a fork's replay pair syncs along in the background). */
+/** The selected network, one at a time (a fork's replay pairs sync along in the background); upcoming ones count down. */
 function NetworkSwitcher() {
-  const { chain, settings } = useWallet()
+  const { chain, settings, snapshots } = useWallet()
+  const shown = WEB_CHAIN_IDS.filter((c) => c === chain || !settings.hidden.includes(c))
   const change = async (next: string) => {
-    if (!isChain(next) || next === chain) return
+    if (!isChain(next) || next === chain || CHAINS[next].soon) return
     try {
       await api("/api/settings", { chain: next })
     } catch (e) {
@@ -121,10 +134,10 @@ function NetworkSwitcher() {
           <ChevronDownIcon className="size-3.5 opacity-60" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56">
+      <DropdownMenuContent align="end" className="w-64">
         <DropdownMenuLabel className="text-xs text-muted-foreground">Network</DropdownMenuLabel>
         <DropdownMenuRadioGroup value={chain} onValueChange={change}>
-          {WEB_CHAIN_IDS.filter((c) => c === chain || !settings.hidden.includes(c)).map((c) => (
+          {shown.filter((c) => !CHAINS[c].soon).map((c) => (
             <DropdownMenuRadioItem key={c} value={c} className="gap-2">
               <span className={cn("size-2 rounded-full", CHAINS[c].bg)} />
               <span className="flex-1">{CHAINS[c].label}</span>
@@ -132,6 +145,18 @@ function NetworkSwitcher() {
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
+        {shown.filter((c) => CHAINS[c].soon).map((c) => (
+          <DropdownMenuLabel key={c} className="flex items-start gap-2 pr-8 text-sm font-normal text-foreground">
+            <span className={cn("mt-1.5 size-2 shrink-0 rounded-full opacity-60", CHAINS[c].bg)} />
+            <span className="flex flex-1 flex-col">
+              <span className="flex items-center gap-1.5 opacity-70">
+                {CHAINS[c].label} <Badge variant="outline" className="px-1.5 py-0 text-[10px]">Soon</Badge>
+              </span>
+              <span className="text-xs text-muted-foreground tabular-nums">{forkCountdown(c, snapshots.btc?.height)}</span>
+            </span>
+            <span className="font-mono text-xs text-muted-foreground">{CHAINS[c].unit}</span>
+          </DropdownMenuLabel>
+        ))}
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
           <Link href="/settings">

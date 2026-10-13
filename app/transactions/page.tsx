@@ -13,7 +13,7 @@ import { ReplayDialog } from "@/components/replay-dialog"
 import { shorten } from "@/components/site-header"
 import { useWallet } from "@/components/wallet-provider"
 import { useUnit } from "@/components/units"
-import { CHAINS, formatAmount, hasData, type Chain } from "@/lib/wallet"
+import { CHAINS, formatAmount, hasData, replayPairs, type Chain } from "@/lib/wallet"
 import { cn } from "@/lib/utils"
 
 // mempool first, then newest first. Sort by block time: heights aren't comparable across chains.
@@ -22,11 +22,11 @@ const dateFmt = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeSt
 
 export default function Transactions() {
   const unit = useUnit()
-  const { snapshots, chains, pair } = useWallet()
-  // replay needs the chain's pair synced alongside (Bitcoin ↔ Blake)
-  const canReplay = !!pair
+  const { snapshots, chains, chain, pairs } = useWallet()
+  // replay needs the chain's pairs synced alongside (Bitcoin ↔ Blake, eCash)
+  const canReplay = pairs.length > 0
   const [replay, setReplay] = useState<{ chain: Chain; txid: string } | null>(null)
-  const loading = !hasData(snapshots.btc) && !hasData(snapshots.xbt)
+  const loading = !chains.some((c) => hasData(snapshots[c]))
 
   const rows = chains.flatMap((chain) => {
     const s = snapshots[chain]
@@ -45,7 +45,7 @@ export default function Transactions() {
       <ReplayDialog target={replay} onClose={() => setReplay(null)} />
       <CardHeader>
         <CardTitle>Transactions</CardTitle>
-        <CardDescription>Activity across Bitcoin and Blake. Bump a stuck send with RBF, or accelerate a stuck receive with CPFP.</CardDescription>
+        <CardDescription>Activity on {CHAINS[chain].label}. Bump a stuck send with RBF, or accelerate a stuck receive with CPFP.</CardDescription>
       </CardHeader>
       <CardContent className="px-0 sm:px-6">
         {loading ? (
@@ -126,7 +126,7 @@ export default function Transactions() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          title={`Replay on ${CHAINS[tx.chain === "btc" ? "xbt" : "btc"].label}`}
+                          title={`Replay on ${replayPairs(tx.chain).map((c) => CHAINS[c].label).join(" or ")}`}
                           onClick={() => setReplay({ chain: tx.chain, txid: tx.txid })}
                         >
                           <Repeat2Icon /> <span className="hidden xl:inline">Replay</span>

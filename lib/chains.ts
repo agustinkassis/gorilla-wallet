@@ -29,11 +29,25 @@ export type ChainDef = {
   maxScript?: number
   /** this app's sends never carry OP_RETURN outputs here (policy; replay checks still use the consensus limit) */
   noDataOutputs?: boolean
-  /** a fork sharing history with this chain: coins can replay between them, so both sync together */
+  /** the chain this fork split from: their shared coins can replay between them, so both sync together */
   replayPair?: Chain
+  /** sends use nLockTime REPLAY_LOCKTIME: final here, never final on Bitcoin (eCash's opt-in replay protection) */
+  replayLockTime?: boolean
+  /** the block it forks from its replay pair at */
+  forkHeight?: number
+  /** not launched yet: listed with a countdown to forkHeight, can't be selected or synced */
+  soon?: boolean
+  /**
+   * BIP300 sidechain deposits (M5): the byte this chain's build uses for OP_DRIVECHAIN, and default enforcers
+   * (bip300301_enforcer's Connect/JSON API: active slots and their treasury UTXOs, which Electrum can't tell)
+   */
+  drivechain?: { opcode: number; enforcer: string[] }
 }
 
-export type Chain = "btc" | "xbt" | "tbtc4" | "tbtc3" | "signet" | "regtest"
+export type Chain = "btc" | "xbt" | "ecx" | "pecx" | "tbtc4" | "tbtc3" | "signet" | "regtest"
+
+/** LOCKTIME_THRESHOLD - 1: eCash treats it as final, Bitcoin as a height ~500M blocks away (never final). */
+export const REPLAY_LOCKTIME = 499_999_999
 
 export const CHAINS: Record<Chain, ChainDef> = {
   regtest: {
@@ -53,7 +67,6 @@ export const CHAINS: Record<Chain, ChainDef> = {
     family: "main",
     electrum: ["ssl://electrum.blockstream.info:50002"],
     mempool: ["https://mempool.space"],
-    replayPair: "xbt",
   },
   xbt: {
     label: "Blake",
@@ -69,6 +82,36 @@ export const CHAINS: Record<Chain, ChainDef> = {
     maxScript: 34,
     noDataOutputs: true,
     replayPair: "btc",
+  },
+  ecx: {
+    label: "eCash",
+    unit: "ECX",
+    text: "text-blue-600 dark:text-blue-400",
+    bg: "bg-blue-500",
+    family: "main",
+    // servers are announced at launch
+    electrum: [],
+    mempool: [],
+    replayPair: "btc",
+    replayLockTime: true,
+    forkHeight: 973_728,
+    soon: true,
+    // drivechain: add at launch, once its build's OP_DRIVECHAIN byte and a public enforcer are known
+  },
+  pecx: {
+    label: "eCash Beta",
+    unit: "pECX",
+    text: "text-sky-600 dark:text-sky-400",
+    bg: "bg-sky-500",
+    family: "main",
+    electrum: ["ssl://explorer.beta.ecash.ninja:50002"],
+    mempool: ["https://explorer.beta.ecash.ninja"],
+    // LayerTwo Labs' betanet: Bitcoin Core 31.1 + BIP300/301 drivechains (magic 0xeca5b104, P2P seed.beta.ecash.ninja:8533)
+    replayPair: "btc",
+    replayLockTime: true,
+    forkHeight: 967_680,
+    // betanet moved OP_DRIVECHAIN from BIP300's OP_NOP5 (0xb4) to OP_NOP8 (bip300301_enforcer NetworkParams::betanet)
+    drivechain: { opcode: 0xb7, enforcer: ["https://enforcer.beta.ecash.ninja"] },
   },
   tbtc4: {
     label: "Testnet4",
@@ -105,16 +148,24 @@ export const isChain = (c: unknown): c is Chain => typeof c === "string" && Obje
 export const familyOf = (chain: Chain) => CHAINS[chain].family
 export const networkOf = (family: Family) => FAMILIES[family].network
 
-/** The selected chain and, for a fork, its replay pair: they sync together (replay checks need both). */
-export const syncedChains = (chain: Chain): Chain[] => [chain, ...(CHAINS[chain].replayPair ? [CHAINS[chain].replayPair!] : [])]
+/** Chains `chain`'s coins replay with: a fork's parent, or a parent's launched forks (Bitcoin: Blake, eCash Beta). */
+export const replayPairs = (chain: Chain): Chain[] => {
+  const parent = CHAINS[chain].replayPair
+  return parent ? [parent] : CHAIN_IDS.filter((c) => CHAINS[c].replayPair === chain && !CHAINS[c].soon)
+}
+
+/** The selected chain and its replay pairs: they sync together (replay checks need both sides). */
+export const syncedChains = (chain: Chain): Chain[] => [chain, ...replayPairs(chain)]
 
 /** The same account on another family: m/84'/0'/0' → m/84'/1'/0' (BIP44 coin type). */
 export const familyPath = (path: string, family: Family) => path.replace(/^m\/(\d+'?)\/\d+'/, `m/$1/${FAMILIES[family].coinType}'`)
 
+/** The replay pair that caps OP_RETURNs, so a bigger one pins a tx to `chain` (Bitcoin vs Blake). */
+export const dataCapPair = (chain: Chain) => replayPairs(chain).find((c) => typeof CHAINS[c].maxDataScript === "number")
+
 /** The smallest OP_RETURN script `chain` accepts so its replay pair rejects it (Bitcoin: 84, Blake allows ≤ 83). */
 export function minDataScript(chain: Chain) {
   if (chain === "regtest") return 84
-  const pair = CHAINS[chain].replayPair
-  const max = pair ? CHAINS[pair].maxDataScript : undefined
-  return typeof max === "number" ? max + 1 : 0
+  const pair = dataCapPair(chain)
+  return pair ? (CHAINS[pair].maxDataScript as number) + 1 : 0
 }

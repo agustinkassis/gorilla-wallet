@@ -11,7 +11,7 @@ import { useWallet } from "@/components/wallet-provider"
 import { api } from "@/lib/api"
 import type { ReplayAnalysis, Status } from "@/lib/server/replay"
 import { useUnit } from "@/components/units"
-import { CHAINS, formatAmount, type Chain } from "@/lib/wallet"
+import { CHAINS, formatAmount, replayPairs, type Chain } from "@/lib/wallet"
 import { cn } from "@/lib/utils"
 
 const TONE: Record<Status, { box: string; edge: string; text: string; icon: typeof CheckCircle2Icon }> = {
@@ -104,18 +104,25 @@ function ReplayGraph({ a }: { a: ReplayAnalysis }) {
   )
 }
 
-/** Analyze rebroadcasting a transaction on the other chain, explain why it works or not, and replay it. */
+/** Analyze rebroadcasting a transaction on a replay pair, explain why it works or not, and replay it. */
 export function ReplayDialog({ target, onClose }: { target: { chain: Chain; txid: string } | null; onClose: () => void }) {
   const { snapshots, wallet, watchOnly } = useWallet()
   const [analysis, setAnalysis] = useState<ReplayAnalysis | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [sent, setSent] = useState<string | null>(null)
+  const [picked, setPicked] = useState<Chain | null>(null)
+
+  const from = target?.chain ?? "btc"
+  // Bitcoin replays onto Blake or eCash: pick one
+  const pairs = replayPairs(from)
+  const to: Chain = picked && pairs.includes(picked) ? picked : (pairs[0] ?? from)
+  const explorer = snapshots[to]?.explorer
 
   useEffect(() => {
     if (!target) return
     let live = true
-    api<ReplayAnalysis>("/api/replay", { ...target, walletId: wallet?.id })
+    api<ReplayAnalysis>("/api/replay", { ...target, to, walletId: wallet?.id })
       .then((a) => live && setAnalysis(a))
       .catch((e) => live && setError((e as Error).message))
     return () => {
@@ -124,17 +131,13 @@ export function ReplayDialog({ target, onClose }: { target: { chain: Chain; txid
       setError(null)
       setSent(null)
     }
-  }, [target, wallet?.id])
-
-  const from = target?.chain ?? "btc"
-  const to: Chain = CHAINS[from].replayPair ?? from
-  const explorer = snapshots[to]?.explorer
+  }, [target, to, wallet?.id])
 
   const replay = async () => {
     if (!target) return
     setBusy(true)
     try {
-      const { txid } = await api<{ txid: string }>("/api/replay/broadcast", { ...target, walletId: wallet?.id })
+      const { txid } = await api<{ txid: string }>("/api/replay/broadcast", { ...target, to, walletId: wallet?.id })
       setSent(txid)
       toast.success(`Replayed on ${CHAINS[to].label}`, { description: shorten(txid) })
     } catch (e) {
@@ -159,6 +162,15 @@ export function ReplayDialog({ target, onClose }: { target: { chain: Chain; txid
             Rebroadcasts the exact same signed transaction on {CHAINS[to].label}. It only works when the coins exist there too and nothing in the
             transaction is invalid on that chain.
           </DialogDescription>
+          {pairs.length > 1 && !sent && (
+            <div className="flex gap-1">
+              {pairs.map((p) => (
+                <Button key={p} size="sm" variant={p === to ? "secondary" : "ghost"} disabled={busy} onClick={() => setPicked(p)}>
+                  <span className={cn("size-2 rounded-full", CHAINS[p].bg)} /> {CHAINS[p].label}
+                </Button>
+              ))}
+            </div>
+          )}
         </DialogHeader>
 
         {error ? (
