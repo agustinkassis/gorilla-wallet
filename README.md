@@ -212,8 +212,10 @@ Every release ships the same installers: macOS (arm64, x64), Windows (x64, arm64
    replaces the files of an existing draft). A failure that needs a code fix: delete the tag
    (`git push --delete origin v0.1.1 && git tag -d v0.1.1`), fix on `main` and tag again.
 4. Open the draft on [Releases](https://github.com/agustinkassis/gorilla-wallet/releases), review the generated notes
-   and files (10: two `.dmg`, two `-setup.exe`, and an AppImage, `.deb` and `.rpm` per Linux arch), and **Publish
-   release**.
+   and files (10 installers: two `.dmg`, two `-setup.exe`, and an AppImage, `.deb` and `.rpm` per Linux arch, plus the
+   social image `gorilla-wallet-v<version>-landscape.png`), and **Publish release**.
+5. Announce it with the social images (see [docs/SOCIAL.md](docs/SOCIAL.md)): the landscape one is already in the
+   release; `pnpm social` makes the square one. Update their features in `docs/social/template.html` before tagging.
 
 ## Scripts
 
@@ -227,6 +229,7 @@ Every release ships the same installers: macOS (arm64, x64), Windows (x64, arm64
 | `pnpm lint` | ESLint |
 | `pnpm db:migrate` | Apply Prisma migrations |
 | `pnpm tauri build` | Desktop app for this OS/arch (see above) |
+| `pnpm social` | Social images for the current version in `social/` (see [docs/SOCIAL.md](docs/SOCIAL.md)) |
 
 ## Security model
 
