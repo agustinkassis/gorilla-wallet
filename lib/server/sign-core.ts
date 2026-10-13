@@ -2,9 +2,9 @@ import "server-only"
 import { secp256k1 } from "@noble/curves/secp256k1.js"
 import { bytesToHex, concatBytes } from "@noble/hashes/utils.js"
 import { SigHash, Transaction, bip32Path, p2pkh, p2wpkh } from "@scure/btc-signer"
-import { outputRuleError } from "@/lib/tx"
+import { hasReplayLockTime, outputRuleError } from "@/lib/tx"
 import { SIGHASH_ALL_UNIFIED, unifiedSighash } from "@/lib/unified-sighash"
-import { CHAINS, type Chain } from "@/lib/chains"
+import { CHAINS, REPLAY_LOCKTIME, type Chain } from "@/lib/chains"
 
 export class SignError extends Error {}
 
@@ -24,7 +24,7 @@ export type SignContext = {
  * Signs a PSBT built by lib/tx.ts. Every input must be this wallet's P2WPKH coin on `chain`
  * (checked against the real parent tx, not the PSBT's claims) and not frozen.
  * BIP143 SIGHASH_ALL, or SIGHASH_UNIFIED (0x21) on chains that use it (Blake): chains without it reject those
- * signatures (replay protection).
+ * signatures (replay protection). eCash transactions must carry its replay-protection nLockTime.
  */
 export async function signWith(chain: Chain, psbt: Uint8Array, ctx: SignContext) {
   let tx: Transaction
@@ -34,6 +34,8 @@ export async function signWith(chain: Chain, psbt: Uint8Array, ctx: SignContext)
     throw new SignError("Invalid PSBT")
   }
   if (!tx.inputsLength || !tx.outputsLength) throw new SignError("PSBT has no inputs or outputs")
+  if (CHAINS[chain].replayLockTime && !hasReplayLockTime(tx))
+    throw new SignError(`${CHAINS[chain].label} transactions must use nLockTime ${REPLAY_LOCKTIME} with RBF/non-final inputs (replay protection)`)
 
   let outSum = 0n
   for (let i = 0; i < tx.outputsLength; i++) {

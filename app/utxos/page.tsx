@@ -16,7 +16,7 @@ import { useWallet } from "@/components/wallet-provider"
 import { api } from "@/lib/api"
 import { INPUT_VSIZE } from "@/lib/tx"
 import { UnitLabel, useUnit } from "@/components/units"
-import { CHAINS, formatAmount, hasData, sharedOutpoints, type Chain } from "@/lib/wallet"
+import { CHAINS, formatAmount, hasData, replayPairs, sharedOutpoints, type Chain } from "@/lib/wallet"
 import { cn } from "@/lib/utils"
 
 type Filter = Chain | "all"
@@ -27,7 +27,7 @@ export default function UtxosPage() {
   const router = useRouter()
   const [filter, setFilter] = useState<Filter>("all")
   const [selected, setSelected] = useState<{ chain: Chain; ops: Set<string> } | null>(null)
-  const shared = useMemo(() => sharedOutpoints(snapshots, active), [snapshots, active])
+  const shared = useMemo(() => replayPairs(active).map((p) => [p, sharedOutpoints(snapshots, active, p)] as const), [snapshots, active])
 
   if (!chains.some((c) => hasData(snapshots[c]))) return <Skeleton className="h-96 w-full rounded-xl" />
 
@@ -161,7 +161,9 @@ export default function UtxosPage() {
                               </Badge>
                             )}
                             {u.height <= 0 && <Badge variant="outline" className="text-amber-600 dark:text-amber-400">Unconfirmed</Badge>}
-                            {shared.has(op) && <Badge variant="outline">Both chains</Badge>}
+                            {shared.filter(([, ops]) => ops.has(op)).map(([p]) => (
+                              <Badge key={p} variant="outline">Also on {CHAINS[p].label}</Badge>
+                            ))}
                             {uneconomical && <Badge variant="outline" className="text-rose-600 dark:text-rose-400">Uneconomical</Badge>}
                           </div>
                           <span className="text-xs text-muted-foreground">

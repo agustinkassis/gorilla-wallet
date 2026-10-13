@@ -6,7 +6,7 @@ import { secp256k1 } from "@noble/curves/secp256k1.js"
 import { base64 } from "@scure/base"
 import { hexToBytes } from "@noble/hashes/utils.js"
 import { SIGHASH_ALL_UNIFIED, SIGHASH_UNIFIED, unifiedSighash } from "@/lib/unified-sighash"
-import { CHAINS, familyOf, minDataScript, networkOf, type Chain } from "@/lib/chains"
+import { CHAINS, REPLAY_LOCKTIME, dataCapPair, familyOf, minDataScript, networkOf, type Chain } from "@/lib/chains"
 
 export type Coin = { txid: string; vout: number; value: number; address: string; change: 0 | 1; index: number; height: number }
 export type Recipient = { address: string; amount: number }
@@ -74,12 +74,12 @@ export function opReturnScript(message: Uint8Array, chain: Chain) {
 
 /** Per-chain consensus/safety rules for an output script. Returns an error message, or null when allowed. */
 export function outputRuleError(chain: Chain, script: Uint8Array): string | null {
-  const { label, maxDataScript, maxScript, noDataOutputs, replayPair } = CHAINS[chain]
+  const { label, maxDataScript, maxScript, noDataOutputs } = CHAINS[chain]
   if (isDataScript(script)) {
     if (maxDataScript === false || noDataOutputs) return `OP_RETURN outputs are not allowed on ${label}`
     if (typeof maxDataScript === "number" && script.length > maxDataScript) return `${label} rejects OP_RETURN scripts over ${maxDataScript} bytes`
     const min = minDataScript(chain)
-    if (script.length < min) return `${label} OP_RETURN must be ≥ ${min} bytes so it can't be replayed on ${CHAINS[replayPair!].label}`
+    if (script.length < min) return `${label} OP_RETURN must be ≥ ${min} bytes so it can't be replayed on ${CHAINS[dataCapPair(chain) ?? chain].label}`
     return null
   }
   if (maxScript && script.length > maxScript) return `${label} rejects output scripts over ${maxScript} bytes`
@@ -110,6 +110,8 @@ const sum = (coins: Coin[]) => coins.reduce((s, c) => s + c.value, 0)
  * 2. else the single coin that fits best (changeless when the excess is below the cost of a change output);
  * 3. else largest-first accumulation.
  * `sendMax` sweeps everything selected (required, or all candidates) to the single recipient.
+ * `guard`: replay guard for a pair with no marker to carry (eCash): spend one of `coins` (coins the pair lacks), adding
+ * the smallest when the plan has none, so the pair rejects the whole transaction.
  */
 export function planTx(o: {
   chain: Chain
@@ -120,6 +122,7 @@ export function planTx(o: {
   fee: FeePolicy
   changeAddress: string
   data?: Uint8Array
+  guard?: { coins: Coin[]; pair: Chain }
 }): TxPlan {
   if (!o.recipients.length) throw new PlanError("Add a recipient")
   if (o.data && (CHAINS[o.chain].maxDataScript === false || CHAINS[o.chain].noDataOutputs))
@@ -147,6 +150,16 @@ export function planTx(o: {
       if (out.kind !== "data" && out.amount < dustLimit(out.script)) throw new PlanError(`Amount below the dust limit (${dustLimit(out.script)} sats)`)
   }
 
+  // replay guard: no guarded coin in the plan → add the smallest one and plan again
+  const guard = (plan: TxPlan): TxPlan => {
+    if (!o.guard) return plan
+    const guarded = new Set(o.guard.coins.map(key))
+    if (plan.inputs.some((c) => guarded.has(key(c)))) return plan
+    const extra = o.guard.coins.filter((c) => !requiredKeys.has(key(c))).sort((a, b) => a.value - b.value)[0]
+    if (!extra) throw new PlanError(`Every spendable coin also exists on ${CHAINS[o.guard.pair].label}: split them there first, or turn off its replay protection`)
+    return planTx({ ...o, guard: undefined, required: [...(o.sendMax && !required.length ? pool : required), extra] })
+  }
+
   if (o.sendMax) {
     if (recipients.length !== 1) throw new PlanError("Send max works with a single recipient")
     const inputs = required.length ? required : pool
@@ -155,7 +168,7 @@ export function planTx(o: {
     const fee = o.fee(vsize)
     const plan = { inputs, outputs: outputs([sum(inputs) - fee], 0), fee, vsize }
     checkDust(plan.outputs)
-    return plan
+    return guard(plan)
   }
 
   const target = recipients.reduce((s, r) => {
@@ -203,7 +216,7 @@ export function planTx(o: {
   if (!plan) throw new PlanError("Insufficient funds for amount + fee")
   const { excess: _excess, ...result } = plan
   void _excess
-  return result
+  return guard(result)
 }
 
 function shuffle<T>(list: T[]) {
@@ -217,9 +230,13 @@ function shuffle<T>(list: T[]) {
   return a
 }
 
+/** eCash replay protection: nLockTime REPLAY_LOCKTIME, binding (some nSequence isn't final), so Bitcoin never accepts it. */
+export const hasReplayLockTime = (tx: Transaction) =>
+  tx.lockTime === REPLAY_LOCKTIME && Array.from({ length: tx.inputsLength }, (_, i) => tx.getInput(i).sequence ?? 0xffffffff).some((s) => s !== 0xffffffff)
+
 /**
  * Unsigned PSBT for a plan. Inputs declare SIGHASH_ALL, or ALL|UNIFIED (0x21) on SIGHASH_UNIFIED chains (Blake).
- * nLockTime = tip (anti-fee-sniping), nSequence signals RBF, output order is randomized.
+ * nLockTime = tip (anti-fee-sniping), or REPLAY_LOCKTIME on eCash; nSequence signals RBF, output order is randomized.
  */
 export function buildPsbt(
   plan: TxPlan,
@@ -227,7 +244,7 @@ export function buildPsbt(
 ) {
   const account = HDKey.fromExtendedKey(ctx.xpub)
   const sighashType = CHAINS[ctx.chain].unifiedSighash ? SIGHASH_ALL_UNIFIED : SigHash.ALL
-  const tx = new Transaction({ version: 2, lockTime: ctx.tipHeight, allowUnknownOutputs: true, allowUnknownInputs: true })
+  const tx = new Transaction({ version: 2, lockTime: CHAINS[ctx.chain].replayLockTime ? REPLAY_LOCKTIME : ctx.tipHeight, allowUnknownOutputs: true, allowUnknownInputs: true })
   for (const coin of plan.inputs) {
     const publicKey = account.deriveChild(coin.change).deriveChild(coin.index).publicKey!
     const parent = ctx.parents?.[coin.txid]

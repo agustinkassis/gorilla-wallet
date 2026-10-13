@@ -7,7 +7,7 @@ import { RawTx, SigHash, Transaction, p2pkh, p2wpkh } from "@scure/btc-signer"
 import { secp256k1 } from "@noble/curves/secp256k1.js"
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js"
 import { finalizeEvent, generateSecretKey, getPublicKey, nip98 } from "nostr-tools"
-import { familyPath } from "../lib/chains"
+import { REPLAY_LOCKTIME, familyPath, minDataScript, replayPairs, syncedChains } from "../lib/chains"
 import { amountInput, deriveAddresses, displayXpub, formatAmount, normalizeXpub, parseAccountKey, parseAmount, parseCoins, scriptHash, txEvents, type Snapshot, type Tx } from "../lib/wallet"
 import { db } from "../lib/server/db"
 import { WrongPasswordError, isLocked, seal, unseal } from "../lib/server/secret"
@@ -19,6 +19,7 @@ import { validRef } from "../lib/server/labels"
 import { parseSettings } from "../lib/server/settings"
 import { headerTime } from "../lib/server/watcher"
 import { signWith, type SignContext } from "../lib/server/sign-core"
+import { validateBroadcast } from "../lib/server/broadcast"
 
 const throws = async (fn: () => unknown, re: RegExp) => {
   try {
@@ -147,6 +148,17 @@ const throws = async (fn: () => unknown, re: RegExp) => {
     () => planTx({ chain: "xbt", recipients: [{ address: dest, amount: 1e4 }], candidates: coins, fee: feeAt(1), changeAddress: change0, data: new Uint8Array(1) }),
     /not allowed on Blake/,
   )
+  // eCash guard: spend a coin eCash lacks, adding the smallest when the best plan has none
+  const guard = (lacking: Coin[]) => ({ coins: lacking, pair: "pecx" as const })
+  p = planTx({ chain: "btc", recipients: [{ address: dest, amount: 10_000 }], candidates: coins, fee: feeAt(2), changeAddress: change0, guard: guard([coins[1]]) })
+  assert.deepEqual(p.inputs.map((c) => c.value), [20_000], "already guarded: unchanged")
+  p = planTx({ chain: "btc", recipients: [{ address: dest, amount: 10_000 }], candidates: coins, fee: feeAt(2), changeAddress: change0, guard: guard([coins[2], coins[0]]) })
+  assert.ok(p.inputs.some((c) => c.value === 5_000), "smallest lacking coin added")
+  p = planTx({ chain: "btc", recipients: [{ address: dest, amount: 0 }], sendMax: true, candidates: coins, fee: feeAt(1), changeAddress: change0, guard: guard([coins[2]]) })
+  assert.equal(p.inputs.length, 3, "send max still sweeps everything")
+  p = planTx({ chain: "btc", recipients: [{ address: dest, amount: 0 }], sendMax: true, required: [coins[0]], fee: feeAt(1), changeAddress: change0, guard: guard([coins[2]]) })
+  assert.deepEqual(p.inputs.map((c) => c.value), [50_000, 5_000], "manual max gets the guard coin")
+  await throws(() => planTx({ chain: "btc", recipients: [{ address: dest, amount: 10_000 }], candidates: coins, fee: feeAt(1), changeAddress: change0, guard: guard([]) }), /split them there first/)
   p = planTx({ chain: "btc", recipients: [{ address: dest, amount: 10_000 }], candidates: coins, fee: feeAt(1), changeAddress: change0, data: new Uint8Array(3) })
   assert.ok(p.outputs.some((o) => o.kind === "data" && o.script.length === 84))
   // BIP125: replacement pays more than the original + its own relay cost; CPFP reaches the package rate
@@ -174,7 +186,7 @@ const throws = async (fn: () => unknown, re: RegExp) => {
     ...overrides,
   })
   const fundCoin: Coin = { txid: fundingId, vout: 0, value: 100_000, address: addr0, change: 0, index: 0, height: 100 }
-  const psbtFor = (chain: "btc" | "xbt", data?: Uint8Array) => {
+  const psbtFor = (chain: "btc" | "xbt" | "pecx", data?: Uint8Array) => {
     const plan = planTx({ chain, recipients: [{ address: dest, amount: 40_000 }], candidates: [fundCoin], fee: feeAt(3), changeAddress: change0, data })
     return buildPsbt(plan, { chain, xpub, fingerprint: master.fingerprint, accountPath: "m/84'/0'/0'", tipHeight: 970_000 }).toPSBT()
   }
@@ -208,6 +220,21 @@ const throws = async (fn: () => unknown, re: RegExp) => {
     !secp256k1.verify(sig.slice(0, -1), signed.preimageWitnessV0(0, p2pkh(pub0).script, SIGHASH_ALL_UNIFIED, 100_000n), pub0, { prehash: false, format: "der" }),
     "…and not against Bitcoin's BIP143 message for the same byte (replay protection)",
   )
+
+  // eCash: plain SIGHASH_ALL, replay-protected by nLockTime 499,999,999 (final there, never final on Bitcoin)
+  const pecx = await signWith("pecx", psbtFor("pecx"), ctx())
+  signed = Transaction.fromRaw(hexToBytes(pecx.hex), { allowUnknownOutputs: true })
+  assert.equal(signed.lockTime, REPLAY_LOCKTIME)
+  assert.equal(signed.getInput(0).sequence, 0xfffffffd, "a non-final input makes the locktime bind")
+  assert.equal(signed.getInput(0).finalScriptWitness![0].at(-1), SigHash.ALL)
+  validateBroadcast("pecx", pecx.hex)
+  await throws(() => validateBroadcast("btc", pecx.hex), /eCash's replay protection/)
+  await throws(() => validateBroadcast("pecx", btc.hex), /must use nLockTime 499999999/)
+  await throws(() => signWith("pecx", psbtFor("btc"), ctx()), /must use nLockTime 499999999/) // a client that skipped the protection
+  assert.deepEqual(replayPairs("btc"), ["xbt", "pecx"], "Bitcoin replays onto Blake and eCash Beta; eCash mainnet isn't live yet")
+  assert.deepEqual(syncedChains("pecx"), ["pecx", "btc"])
+  assert.equal(minDataScript("btc"), 84)
+  assert.equal(minDataScript("pecx"), 0, "eCash has no OP_RETURN cap to pin a tx with")
 
   // external signer round trip: a finalized tx, or a PSBT with partial sigs, must match what we built
   const btcPsbt = psbtFor("btc")
@@ -286,6 +313,8 @@ const throws = async (fn: () => unknown, re: RegExp) => {
   assert.deepEqual(parseSettings({ hidden: ["xbt", "signet", "xbt"] }), { hidden: ["xbt", "signet"] })
   assert.throws(() => parseSettings({ hidden: ["doge"] }), /Invalid setting/)
   assert.throws(() => parseSettings({ hidden: "xbt" }), /Invalid setting/)
+  assert.deepEqual(parseSettings({ chain: "pecx" }), { chain: "pecx" })
+  assert.throws(() => parseSettings({ chain: "ecx" }), /Invalid setting/, "eCash mainnet can't be selected before it launches")
 
   // --- labels: one chain each, address refs checked against that chain's network ---------------
   assert.ok(validRef("addr", "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", "btc"))

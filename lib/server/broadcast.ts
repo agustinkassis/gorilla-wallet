@@ -1,7 +1,7 @@
 import "server-only"
 import type { ChainClient } from "@/lib/server/watcher"
-import { CHAINS, type Chain } from "@/lib/chains"
-import { parseTxHex, outputRuleError } from "@/lib/tx"
+import { CHAINS, REPLAY_LOCKTIME, type Chain } from "@/lib/chains"
+import { hasReplayLockTime, parseTxHex, outputRuleError } from "@/lib/tx"
 import { SIGHASH_UNIFIED } from "@/lib/unified-sighash"
 
 export class BroadcastError extends Error {}
@@ -10,10 +10,13 @@ export function validateBroadcast(chain: Chain, hex: string) {
   if (!/^[0-9a-f]+$/i.test(hex) || hex.length % 2) throw new BroadcastError("Invalid transaction")
   const tx = parseTxHex(hex)
   if (!tx.inputsLength || !tx.outputsLength) throw new BroadcastError("Transaction has no inputs or outputs")
+  const { label, replayLockTime } = CHAINS[chain]
+  if (replayLockTime && !hasReplayLockTime(tx)) throw new BroadcastError(`${label} transactions must use nLockTime ${REPLAY_LOCKTIME} (replay protection)`)
+  if (!replayLockTime && hasReplayLockTime(tx)) throw new BroadcastError(`nLockTime ${REPLAY_LOCKTIME} is eCash's replay protection: ${label} never accepts it`)
   for (let i = 0; i < tx.inputsLength; i++) {
     const sig = tx.getInput(i).finalScriptWitness?.[0]
     const unified = !!sig && (sig[sig.length - 1] & SIGHASH_UNIFIED) !== 0
-    const { label, unifiedSighash } = CHAINS[chain]
+    const { unifiedSighash } = CHAINS[chain]
     if (unifiedSighash && !unified) throw new BroadcastError(`${label} transactions must be SIGHASH_UNIFIED-signed (replay protection)`)
     if (!unifiedSighash && unified) throw new BroadcastError(`This transaction is SIGHASH_UNIFIED-signed: ${label} rejects it`)
   }
