@@ -150,7 +150,9 @@ jobs:
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$GITHUB_REF_NAME" "${files[@]}" --draft --generate-notes --title "Gorilla Wallet $GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY"
+            # the social image (uploaded below) on top of the generated notes; it shows once the release is published
+            image="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/gorilla-wallet-$GITHUB_REF_NAME-landscape.png"
+            gh release create "$GITHUB_REF_NAME" "${files[@]}" --draft --generate-notes --notes "![Gorilla Wallet $GITHUB_REF_NAME]($image)" --title "Gorilla Wallet $GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY"
           fi
         env:
           GH_TOKEN: ${{ github.token }}

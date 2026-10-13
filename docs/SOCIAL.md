@@ -54,8 +54,9 @@ reencuadrar el gorila en `landscape`, ajustá `background-position` de `.art` en
 
 ## Publicarlas
 
-1. La `landscape` ya está en los assets del release (`gorilla-wallet-v<versión>-landscape.png`). Revisala en el
-   borrador antes de publicarlo. Si cambiaste las features después del tag, corré `pnpm social` y reemplazala
+1. La `landscape` ya está en el release: como asset (`gorilla-wallet-v<versión>-landscape.png`) y arriba de las notas.
+   En el borrador la imagen de las notas aparece rota, porque los assets de un borrador no son públicos; se ve al
+   publicarlo. Para revisarla antes, abrila desde la lista de assets. Si cambiaste las features después del tag, corré `pnpm social` y reemplazala
    (`gh release upload v<versión> social/gorilla-wallet-v<versión>-landscape.png --clobber`).
 2. La `square` se genera local con `pnpm social`, para Instagram.
 3. En redes, acompañalas con el link al release:
