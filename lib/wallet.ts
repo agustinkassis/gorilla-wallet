@@ -34,6 +34,8 @@ export type WalletInfo = {
   /** per family; a missing one is enabled from the seed (password if any), watch-only wallets have just one */
   accounts: Partial<Record<Family, Account>>
   watchOnly: boolean
+  /** watch-only Bitcoin key also used on testnets (same keys, tb1 addresses): its own testnet account isn't derivable */
+  mainKeyOnTestnets?: boolean
   /** signing asks for this wallet's password */
   needsPassword: boolean
   passphrase: boolean
@@ -184,7 +186,8 @@ export function sharedOutpoints(snapshots: Partial<Record<Chain, Snapshot>>, cha
 /** First address on a branch that is unused on every chain. */
 export function nextUnused(snapshots: Partial<Record<Chain, Snapshot>>, change: 0 | 1) {
   const used = new Set(Object.values(snapshots).flatMap((s) => s?.addresses.filter((a) => a.used).map((a) => a.address) ?? []))
-  const all = (snapshots.btc ?? snapshots.xbt)?.addresses.filter((a) => a.change === change) ?? []
+  // the synced chains share their family's addresses: any of them lists them (testnets have no btc/xbt snapshot)
+  const all = Object.values(snapshots).find((s) => s?.addresses.length)?.addresses.filter((a) => a.change === change) ?? []
   return all.sort((a, b) => a.index - b.index).find((a) => !used.has(a.address))
 }
 

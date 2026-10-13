@@ -9,7 +9,7 @@ import { sha256 } from "@noble/hashes/sha2.js"
 import { bytesToHex, hexToBytes, utf8ToBytes } from "@noble/hashes/utils.js"
 import { finalizeEvent, generateSecretKey, getPublicKey, nip98 } from "nostr-tools"
 import { REPLAY_LOCKTIME, familyPath, minDataScript, replayPairs, syncedChains } from "../lib/chains"
-import { amountInput, deriveAddresses, displayXpub, formatAmount, normalizeXpub, parseAccountKey, parseAmount, parseCoins, scriptHash, txEvents, type Snapshot, type Tx } from "../lib/wallet"
+import { amountInput, deriveAddresses, displayXpub, formatAmount, nextUnused, normalizeXpub, parseAccountKey, parseAmount, parseCoins, scriptHash, txEvents, type Snapshot, type Tx } from "../lib/wallet"
 import { db } from "../lib/server/db"
 import { WrongPasswordError, isLocked, seal, unseal } from "../lib/server/secret"
 import { createSeedWallet, deleteWallet, importWatchWallet, listWallets, setFingerprint, signingAccount, unlockAccounts } from "../lib/server/wallets"
@@ -45,6 +45,7 @@ import { moduleFetch, storageGet, storageSet } from "../lib/server/modules"
 import { MODULE_ID, type ModuleManifest } from "../lib/modules/types"
 import { MODULES } from "../modules"
 import { UIS } from "../modules/ui"
+import type { FaucetConfig } from "../modules/faucet/manifest"
 
 const throws = async (fn: () => unknown, re: RegExp) => {
   try {
@@ -108,6 +109,11 @@ const throws = async (fn: () => unknown, re: RegExp) => {
     walletId: "w", chain: "btc", connected: true, synced, server: null, height: 100, explorer: "", fees: null, addresses: [], utxos: [], txs,
   })
   const tx = (txid: string, height: number, amount: number): Tx => ({ txid, height, amount, time: null })
+  // next unused address: from whichever synced chain lists them (a testnet has no btc/xbt snapshot)
+  const addr = (address: string, index: number, used: boolean) => ({ address, change: 0 as const, index, used, confirmed: 0, unconfirmed: 0 })
+  const tbtc4 = { ...snap([]), chain: "tbtc4" as const, addresses: [addr("tb1qa", 0, true), addr("tb1qb", 1, false), addr("tb1qc", 2, false)] }
+  assert.equal(nextUnused({ tbtc4 }, 0)?.address, "tb1qb")
+  assert.equal(nextUnused({ tbtc4, tbtc3: { ...tbtc4, chain: "tbtc3", addresses: [addr("tb1qb", 1, true)] } }, 0)?.address, "tb1qc", "used on a pair counts")
   const old = tx("old", 50, 1000)
   assert.deepEqual(txEvents(undefined, snap([old])), [])
   assert.deepEqual(txEvents(snap([], false), snap([old])), [])
@@ -385,10 +391,11 @@ const throws = async (fn: () => unknown, re: RegExp) => {
   assert.equal((await listWallets()).find((w) => w.id === watch.id)?.accounts.main?.fingerprint, 0x0badf00d)
   await throws(() => setFingerprint(watch.id, "nope"), /8 hex/)
   await deleteWallet(described.id)
-  assert.ok(watch.watchOnly && watch.accounts.main?.xpub === xpub && !watch.accounts.test)
+  // a watch-only Bitcoin key watches testnets with the same keys (its m/84'/1'/0' account isn't derivable)
+  assert.ok(watch.watchOnly && watch.accounts.main?.xpub === xpub && watch.accounts.test === watch.accounts.main && watch.mainKeyOnTestnets)
   await throws(() => signingAccount(watch.id, "main"), /watch-only/)
   const watchTest = await importWatchWallet({ name: "check watch test", xpub: displayXpub(testXpub, "test") })
-  assert.deepEqual(watchTest.accounts, { test: { xpub: testXpub, path: "m/84'/1'/0'", fingerprint: 0 } })
+  assert.deepEqual(watchTest.accounts, { test: { xpub: testXpub, path: "m/84'/1'/0'", fingerprint: 0 } }, "never the other way: no mainnet coins on a testnet path")
   await deleteWallet(watchTest.id)
   await throws(() => deleteWallet("env"), /\.env/)
   await deleteWallet(soft.id)
@@ -411,6 +418,12 @@ const throws = async (fn: () => unknown, re: RegExp) => {
     assert.ok(UIS[m.ui], `${m.id}: UI "${m.ui}" is registered in modules/ui.ts`)
     for (const h of m.hosts ?? []) assert.match(h, /^(?!localhost$)[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/, `${m.id}: ${h} must be a public hostname`)
   }
+  // faucets: https only, and an API faucet's host is one the instance may reach
+  for (const m of MODULES.filter((x) => x.ui === "faucet"))
+    for (const f of (m.config as FaucetConfig).faucets) {
+      assert.match(f.url, /^https:\/\//, `${m.id}: ${f.name}`)
+      if (f.api) for (const u of [f.api.claim, f.api.info]) assert.ok(m.hosts?.includes(new URL(u).hostname), `${m.id}: ${u} must be in hosts`)
+    }
   const modA = { ...MODULES[0], id: "check-a", hosts: ["api.example.org"] } as ModuleManifest
   const modB = { ...modA, id: "check-b" }
   await storageSet(modA, "k", { n: 1 })

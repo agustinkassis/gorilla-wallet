@@ -21,13 +21,14 @@ import { shorten } from "@/components/site-header"
 import { UnitLabel, useUnit } from "@/components/units"
 import { useWallet } from "@/components/wallet-provider"
 import { KIND } from "@/components/wallet-switcher"
-import { FAMILIES, formatAmount, nextUnused, type Chain, type WalletInfo } from "@/lib/wallet"
+import { FAMILIES, formatAmount, nextUnused, syncedChains, type Chain, type WalletInfo } from "@/lib/wallet"
 
 /** Your own receive addresses on `chain`, per wallet: used or labeled ones, plus the next unused one. */
 function useMyAddresses(chain: Chain) {
   const { wallets, allSnapshots } = useWallet()
   return wallets.flatMap((w) => {
-    const next = nextUnused(allSnapshots[w.id] ?? {}, 0)?.address
+    // this chain and its replay pairs (an address used on either isn't next), never a stale other network
+    const next = nextUnused(Object.fromEntries(syncedChains(chain).map((c) => [c, allSnapshots[w.id]?.[c]])), 0)?.address
     const list = (allSnapshots[w.id]?.[chain]?.addresses ?? [])
       .filter((a) => a.change === 0 && (a.used || a.label || a.address === next))
       .sort((a, b) => a.index - b.index)

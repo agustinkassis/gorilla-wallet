@@ -3,8 +3,9 @@
 import type { Chain } from "@/lib/chains"
 import type { ModuleManifest, Slot } from "@/lib/modules/types"
 import { example } from "./example/manifest"
+import { faucets } from "./faucet/manifest"
 
-export const MODULES: ModuleManifest[] = [example]
+export const MODULES: ModuleManifest[] = [...faucets, example]
 
 export const moduleById = (id: string) => MODULES.find((m) => m.id === id)
 

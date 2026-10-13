@@ -6,7 +6,8 @@ a small API, limited to the permissions the user sees in **Settings → Modules*
 goes through the wallet's own review → sign → broadcast dialog.
 
 `modules/example` is the reference: a block/price ticker (dashboard), an API playground (page) and a "pay yourself"
-transaction type (Send). It's off by default; turn it on in Settings → Modules.
+transaction type (Send). It's off by default; turn it on in Settings → Modules. `modules/faucet` is a real one: a
+faucet page on Signet, Testnet4 and Testnet3, three instances of one UI with their own faucet lists.
 
 ## Anatomy
 
@@ -75,6 +76,7 @@ export default function Faucet({ view }: { view: string }) {
 | `storage.get(key)` / `storage.set(key, value)` | – | this module's own JSON store (≤ 64 KB per value, 500 keys); `null` deletes |
 | `http.fetch(url, { method, headers, body })` | `hosts` | made by the wallet's server: https, port 443, no redirects followed, text in/out, 1 MB up / 2 MB down, 15 s |
 | `ui.toast(message)` | – | a notification in the wallet |
+| `ui.copy(text)` | – | copies one of the wallet's own addresses to the clipboard; anything else is refused, so a module can't plant an address for the user to paste |
 
 Use only the SDK: browser storage, cookies and network calls fail inside the frame. Components in
 `@/components/ui/*`, `lucide-react` and `@/lib/utils` are fine; ESLint refuses imports of the wallet's internals
