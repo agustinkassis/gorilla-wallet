@@ -29,6 +29,7 @@ for (const [name, [width, height]] of Object.entries(SIZES)) {
     "--headless",
     "--disable-gpu",
     "--hide-scrollbars",
+    ...(process.env.CI ? ["--no-sandbox"] : []), // GitHub's Ubuntu runners block Chrome's sandbox; it only opens our template
     "--force-device-scale-factor=1",
     `--window-size=${width},${height}`,
     "--virtual-time-budget=10000", // lets the Google Fonts load before the shot

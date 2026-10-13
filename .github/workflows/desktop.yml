@@ -154,3 +154,15 @@ jobs:
           fi
         env:
           GH_TOKEN: ${{ github.token }}
+
+      # the landscape social image (docs/SOCIAL.md), with this tag's version, next to the installers
+      - uses: actions/checkout@v5
+        with:
+          path: repo
+      - name: Social image
+        working-directory: repo
+        run: |
+          node scripts/social.mjs
+          gh release upload "$GITHUB_REF_NAME" "social/gorilla-wallet-$GITHUB_REF_NAME-landscape.png" --clobber --repo "$GITHUB_REPOSITORY"
+        env:
+          GH_TOKEN: ${{ github.token }}

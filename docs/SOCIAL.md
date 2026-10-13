@@ -1,6 +1,8 @@
 # Imágenes para redes sociales
 
-Cada release se anuncia con las mismas dos imágenes, generadas desde una plantilla para que todas se vean iguales:
+Cada release se anuncia con las mismas dos imágenes, generadas desde una plantilla para que todas se vean iguales.
+La horizontal se genera y se adjunta sola al release: el workflow de Desktop la sube al borrador junto a los
+instaladores.
 
 | Formato | Tamaño | Dónde |
 |---|---|---|
@@ -9,7 +11,8 @@ Cada release se anuncia con las mismas dos imágenes, generadas desde una planti
 
 ## Generarlas
 
-Requiere Google Chrome (o Chromium) instalado y conexión a internet para las fuentes.
+Requiere Google Chrome (o Chromium) instalado y conexión a internet para las fuentes. Como las features se leen de la
+plantilla al momento del tag, actualizalas **antes** de taggear el release.
 
 ```bash
 pnpm social
@@ -51,6 +54,9 @@ reencuadrar el gorila en `landscape`, ajustá `background-position` de `.art` en
 
 ## Publicarlas
 
-1. Adjuntá la `landscape` al release de GitHub (Edit → arrastrarla a los assets) o usala en el post del anuncio.
-2. En redes, acompañala con el link al release:
+1. La `landscape` ya está en los assets del release (`gorilla-wallet-v<versión>-landscape.png`). Revisala en el
+   borrador antes de publicarlo. Si cambiaste las features después del tag, corré `pnpm social` y reemplazala
+   (`gh release upload v<versión> social/gorilla-wallet-v<versión>-landscape.png --clobber`).
+2. La `square` se genera local con `pnpm social`, para Instagram.
+3. En redes, acompañalas con el link al release:
    `https://github.com/agustinkassis/gorilla-wallet/releases/tag/v<versión>`.
