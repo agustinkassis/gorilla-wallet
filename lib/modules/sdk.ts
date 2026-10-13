@@ -21,6 +21,8 @@ if (typeof window !== "undefined")
   })
 
 function call<T>(method: string, params?: unknown): Promise<T> {
+  // opened on its own: no wallet to answer (and our own message would come back as the "answer")
+  if (window.parent === window) return Promise.reject(new Error("Not running inside Gorilla Wallet"))
   const id = ++seq
   return new Promise<T>((resolve, reject) => {
     pending.set(id, { resolve: resolve as (v: unknown) => void, reject })
@@ -66,7 +68,7 @@ export function useModule() {
       document.documentElement.style.colorScheme = i.theme
       setInit(i)
     })
-    const resize = new ResizeObserver(() => void call("ui.resize", { height: document.body.offsetHeight }))
+    const resize = new ResizeObserver(() => void call("ui.resize", { height: document.body.offsetHeight }).catch(() => {}))
     resize.observe(document.body)
     return () => {
       live = false
