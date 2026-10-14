@@ -12,6 +12,7 @@
 next-env.d.ts
 
 # secrets: never commit the seed or keys
+/secrets/
 .env
 .env.*
 !.env.example

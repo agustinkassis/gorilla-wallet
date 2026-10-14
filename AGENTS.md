@@ -46,6 +46,25 @@ runtime and certificate configuration. Reserve `mise` and direct execution of `.
 files (including `node bin/gorila.mjs` and inline scripts) for code development and testing, not as the
 default path for production wallet operations.
 
+#### CLI operational checklist
+
+- Read `docs/CLI.md` and use `gorila --help` to confirm current options before preparing an operation.
+- Resolve wallet names with `gorila wallet list --json`; do not silently substitute a similarly named wallet.
+  Query fresh BTC and XBT balances with `gorila balance --wallet NAME --chain all --json`; keep currencies separate.
+- For BTC forwarding from the whole wallet, use `forward add --chain btc --from-wallet` with explicit
+  `--wallet`, `--to`, `--every` (minutes), and `--max-fee-rate` (sat/vB). The CLI installs its own cron block.
+- `--amount-sats` pays a fixed amount with the fee charged in addition; omitting it sweeps eligible funds minus
+  the fee. `--balance-above-sats` is a strict eligible-wallet-balance trigger, not a retained reserve or an
+  instruction to send only the excess. Keep amounts and fee limits specific to the user's current request.
+- `--message` supplies the UTF-8 OP_RETURN text. `--min-conf` controls eligible confirmations (default: one).
+- Encrypted wallets require `--password-file`. For the local workflow, use `--password-file pass.txt` when
+  requested; it resolves against the caller's working directory, not the CLI checkout. The file must have
+  permissions `600` and remain available for cron; never print or persist its contents in docs or memory.
+- Preparing a command is not authorization to install a rule or send funds. Preserve the interactive
+  confirmation unless the user explicitly requests unattended creation with `--yes`.
+- Inspect rules with `gorila forward list` / `gorila forward show ID`; preview with
+  `gorila forward run ID --dry-run`, which does not sign or broadcast.
+
 ### Running one check
 
 There is no test framework and no per-test filter. The suites are plain `node:assert` scripts
