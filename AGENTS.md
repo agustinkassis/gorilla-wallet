@@ -38,6 +38,14 @@ pnpm check:cli          # CLI + core suite (isolated SQLite, simulated Electrum/
 pnpm check:cli:regtest  # end-to-end against Docker bitcoind + electrs (compose.regtest.yml)
 ```
 
+### Production operations with real BTC
+
+For user-requested production operations involving real BTC, prefer the installed `gorila` binary,
+including balance queries, sends and transaction-status checks. It preserves the operational wrapper's
+runtime and certificate configuration. Reserve `mise` and direct execution of `.js`, `.mjs` or `.ts`
+files (including `node bin/gorila.mjs` and inline scripts) for code development and testing, not as the
+default path for production wallet operations.
+
 ### Running one check
 
 There is no test framework and no per-test filter. The suites are plain `node:assert` scripts
