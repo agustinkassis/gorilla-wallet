@@ -220,6 +220,26 @@ async function main() {
     assert.match((await invoke(rule(["--yes"], { to: address.toUpperCase() }), false)).error, /same address/)
     assert.match((await invoke(rule(["--yes"], { every: "7" }), false)).error, /--every/)
     assert.match((await invoke(rule(["--yes"], { cap: "0" }), false)).error, /max-fee-rate/)
+    const walletRule = rule(["--yes"]).filter((_, i, argv) => argv[i] !== "--from" && argv[i - 1] !== "--from")
+    assert.match((await invoke(walletRule, false)).error, /exactly one.*--from.*--from-wallet/)
+    assert.match((await invoke(rule(["--yes", "--from-wallet"]), false)).error, /exactly one.*--from.*--from-wallet/)
+    for (const amount of ["0", "-1", "1.5", "1e3", "9007199254740992", ""]) {
+      assert.match((await invoke(rule(["--yes", "--amount-sats", amount]), false)).error, /amount-sats.*positive integer/)
+    }
+    for (const threshold of ["-1", "1.5", "1e3", "9007199254740992", ""]) {
+      assert.match((await invoke(rule(["--yes", "--balance-above-sats", threshold]), false)).error, /balance-above-sats.*non-negative.*integer/)
+    }
+    assert.match((await invoke([...walletRule, "--from-wallet"], false)).error, /--to.*belongs to this wallet/)
+    assert.match((await invoke([...walletRule.map((s) => s === destination ? address.toUpperCase() : s), "--from-wallet"], false)).error, /--to.*belongs to this wallet/)
+    const configured = (await invoke([...walletRule.map((s) => s === destination ? foreign : s), "--from-wallet", "--amount-sats", "15000", "--balance-above-sats", "0"])).result
+    assert.equal(configured.rule.from, null)
+    assert.equal(configured.rule.source, "wallet")
+    assert.equal(configured.rule.mode, "fixed")
+    assert.equal(configured.rule.amountSats, 15000)
+    assert.equal(configured.rule.balanceAboveSats, 0)
+    assert.deepEqual((await invoke(["forward", "show", configured.rule.id])).result.rule, configured.rule)
+    assert.equal((await invoke(["forward", "list"])).result.rules.find((r: { id: string }) => r.id === configured.rule.id).amountSats, 15000)
+    await invoke(["forward", "remove", configured.rule.id])
     const lockedAddress = (await invoke(["addresses", "--wallet", created.wallet.id])).result.addresses[0].address
     const encryptedRule = rule(["--yes"], { wallet: created.wallet.id, from: lockedAddress })
     assert.match((await invoke(encryptedRule, false)).error, /--password-file/)
@@ -231,6 +251,10 @@ async function main() {
     const capped = (await invoke(rule(["--yes"], { cap: "1" }))).result
     assert.match(capped.rule.id, /^[0-9a-f]{8}$/)
     assert.equal(capped.rule.opReturn, "random-90")
+    assert.equal(capped.rule.source, "address")
+    assert.equal(capped.rule.mode, "sweep")
+    assert.equal(capped.rule.amountSats, null)
+    assert.equal(capped.rule.balanceAboveSats, null)
     assert.equal(capped.cron.schedule, "*/5 * * * *")
     const crontab = await readFile(crontabFile, "utf8")
     assert.match(crontab, /unrelated/)

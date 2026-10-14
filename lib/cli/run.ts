@@ -34,7 +34,7 @@ tx-status TXID --chain btc|xbt|regtest
 config show
 config set --chain btc|xbt|regtest [--electrum URL ...] [--mempool URL ...]
 send --chain btc|xbt|regtest --to ADDRESS --amount-sats N [--message TEXT] [--fee-rate N] [--yes]
-forward add --chain btc|regtest --from ADDRESS --to ADDRESS --every MINUTES --max-fee-rate N [--min-conf N] [--message TEXT] [--password-file FILE] [--yes]
+forward add --chain btc|regtest (--from ADDRESS | --from-wallet) --to ADDRESS --every MINUTES --max-fee-rate N [--amount-sats N] [--balance-above-sats N] [--min-conf N] [--message TEXT] [--password-file FILE] [--yes]
 forward list
 forward show ID [--runs N]
 forward remove ID
@@ -43,8 +43,9 @@ forward run ID [--dry-run]
 Common: --wallet ID_OR_NAME, --json, --timeout SECONDS (default 120), --help
 Network commands accept --password-file FILE to enable a missing encrypted wallet account.
 Secrets use hidden terminal prompts or explicit files. --passphrase prompts for a BIP39 passphrase.
-forward add installs a crontab entry that sweeps --from's confirmed coins to --to with an OP_RETURN
-(--message, or 90 random bytes per send); runs above --max-fee-rate wait for the next one.
+forward add installs a crontab entry that sends --amount-sats exactly (fee extra), or sweeps the source.
+--balance-above-sats requires eligible wallet balance strictly above N, not a reserve.
+Each send carries an OP_RETURN (--message, or 90 random bytes); fee caps apply to estimate and effective fee.
 `
 
 const commandOptions: Record<string, readonly string[]> = {
@@ -58,7 +59,7 @@ const commandOptions: Record<string, readonly string[]> = {
   balance: ["chain", "all-wallets", "password-file"], transactions: ["chain", "password-file"], "tx-status": ["chain", "password-file"],
   "config show": [], "config set": ["chain", "electrum", "mempool"],
   send: ["chain", "to", "amount-sats", "message", "fee-rate", "yes", "password-file"],
-  "forward add": ["chain", "from", "to", "every", "min-conf", "max-fee-rate", "message", "password-file", "yes"],
+  "forward add": ["chain", "from", "from-wallet", "to", "amount-sats", "balance-above-sats", "every", "min-conf", "max-fee-rate", "message", "password-file", "yes"],
   "forward list": [], "forward show": ["runs"], "forward remove": [], "forward run": ["dry-run"],
 }
 function required(args: Args, name: string) {

@@ -27,9 +27,11 @@ export function validateBroadcast(chain: Chain, hex: string) {
 }
 
 /** Push a raw tx to the watcher's own chain: its mempool sources in order, then Electrum. Returns the txid. */
-export async function broadcastHex(watcher: ChainClient, hex: string) {
+export async function broadcastHex(watcher: ChainClient, hex: string, beforeAttempt?: () => Promise<void>) {
   const expected = parseTxHex(hex).id
   for (const base of watcher.mempool) {
+    // A forward may lose its lease while an endpoint times out; fence every fallback, not only the first attempt.
+    await beforeAttempt?.()
     try {
       const res = await fetch(`${base}/api/tx`, {
         method: "POST",
@@ -47,6 +49,7 @@ export async function broadcastHex(watcher: ChainClient, hex: string) {
       if (e instanceof BroadcastError) throw e
     }
   }
+  await beforeAttempt?.()
   try {
     const txid = await watcher.client.request<string>("blockchain.transaction.broadcast", [hex])
     if (txid !== expected) throw new BroadcastError("Server returned a different transaction ID")

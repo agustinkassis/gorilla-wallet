@@ -180,6 +180,30 @@ const throws = async (fn: () => unknown, re: RegExp) => {
   }
   const pub0 = account.deriveChild(0).deriveChild(0).publicKey!
 
+  // A forward's lease can be lost while fetching prevouts. Ownership must be checked after those awaits,
+  // before any signature is generated, not merely before entering the signing boundary.
+  const originalSign = Transaction.prototype.signIdx
+  let generatedSignatures = 0
+  Transaction.prototype.signIdx = function (...args) {
+    generatedSignatures++
+    return originalSign.apply(this, args)
+  }
+  try {
+    for (const chain of ["btc", "xbt"] as const) {
+      let owned = true
+      const guarded = ctx({
+        prevOut: async (_txid, vout) => {
+          await Promise.resolve()
+          owned = false
+          return funding.getOutput(vout)
+        },
+        beforeSign: async () => { if (!owned) throw new Error("Forward lease lost before signing") },
+      })
+      await assert.rejects(signWith(chain, psbtFor(chain), guarded), /lease lost before signing/)
+    }
+    assert.equal(generatedSignatures, 0)
+  } finally { Transaction.prototype.signIdx = originalSign }
+
   const btc = await signWith("btc", psbtFor("btc", new Uint8Array(5)), ctx())
   let signed = Transaction.fromRaw(hexToBytes(btc.hex), { allowUnknownOutputs: true })
   let [sig, pub] = signed.getInput(0).finalScriptWitness!

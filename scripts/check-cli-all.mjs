@@ -13,7 +13,7 @@ function run(args, env = {}) {
 try {
   const tsx = requireLocal.resolve('tsx/cli')
   run([tsx, 'scripts/check-cli-args.ts'])
-  for (const [script, database] of [['scripts/check-wallet-core.ts', 'wallet-core-check.db'], ['scripts/check-regtest-core.ts', 'regtest-core-check.db'], ['scripts/check-sync-session.ts', 'sync-check.db']]) {
+  for (const [script, database] of [['scripts/check-wallet-core.ts', 'wallet-core-check.db'], ['scripts/check-regtest-core.ts', 'regtest-core-check.db'], ['scripts/check-sync-session.ts', 'sync-check.db'], ['scripts/check-forward.ts', 'forward-check.db']]) {
     const env = { DATABASE_URL: `file:${join(temporary, database)}` }
     run([requireLocal.resolve('prisma/build/index.js'), 'migrate', 'deploy'], env)
     run([tsx, '--conditions=react-server', script], env)

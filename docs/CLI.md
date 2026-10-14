@@ -208,32 +208,55 @@ validaciones de publicación normal. Un rechazo de la red se devuelve como error
 
 ## Reenvío automático
 
-Una regla de reenvío vigila una dirección A de la wallet y, en cada ejecución,
-envía todas sus monedas a una dirección B con un OP_RETURN. gorila instala una
-entrada propia en el crontab del usuario.
+Una regla de reenvío vigila un origen de la wallet (una dirección o la wallet
+entera) y, en cada ejecución, paga a una dirección B con un OP_RETURN. gorila
+instala una entrada propia en el crontab del usuario.
 
 ```sh
 gorila forward add --wallet ahorro --chain btc --from bc1qA... --to bc1qB... \
   --every 5 --max-fee-rate 10
+gorila forward add --wallet ahorro --chain btc --from-wallet --to bc1qB... \
+  --every 10 --max-fee-rate 10 --amount-sats 50000 --balance-above-sats 1000000
 gorila forward add --wallet ahorro --chain btc --from bc1qA... --to bc1qB... \
-  --every 60 --max-fee-rate 5 --min-conf 3 --message "pago reenviado"
+  --every 60 --max-fee-rate 5 --amount-sats 25000 --min-conf 3 --message "pago reenviado"
+gorila forward add --wallet ahorro --chain regtest --from-wallet --to bcrt1qB... \
+  --every 5 --max-fee-rate 10 --balance-above-sats 100000
 gorila forward list
 gorila forward show 1a2b3c4d --runs 50
 gorila forward run 1a2b3c4d --dry-run
 gorila forward remove 1a2b3c4d
 ```
 
-- **A** tiene que ser una dirección ya derivada de la wallet (ver `addresses`);
-  **B** puede ser cualquier dirección de la cadena. Cada ejecución gasta solo las
-  monedas de A, sin cambio: B recibe el total menos la comisión.
+- **Origen:** exactamente uno de `--from ADDRESS` y `--from-wallet`. Con `--from`
+  solo se gastan monedas de esa dirección, que ya tiene que estar derivada en la
+  wallet (ver `addresses`); con `--from-wallet`, monedas de cualquier dirección
+  de la wallet en esa chain, incluidas las de cambio.
+- **Monto:** sin `--amount-sats`, cada ejecución barre el saldo elegible del
+  origen y **B** recibe el total menos la comisión. Con `--amount-sats N`, **B**
+  recibe exactamente N sats, la comisión sale del mismo origen y solo se
+  seleccionan los UTXOs necesarios; el resto vuelve como cambio a la dirección
+  vigilada (`--from`) o a una dirección de cambio sin usar (`--from-wallet`).
+  N debe ser un entero positivo seguro (hasta 9007199254740991).
+- **Umbral:** `--balance-above-sats X` solo envía cuando el saldo elegible de
+  **toda la wallet** en esa chain es estrictamente mayor que X. No es una
+  reserva: el envío puede dejar el saldo por debajo. Sin la opción no se aplica
+  ninguna condición de saldo.
+  X debe ser un entero no negativo seguro; cero exige un saldo elegible positivo.
+- **Destino:** **B** puede ser cualquier dirección de la cadena, salvo que con
+  `--from-wallet` no puede pertenecer a la propia wallet: sería un reenvío
+  interno que solo gasta comisión en cada ciclo.
 - **Cadenas:** `btc` y `regtest`. XBT no admite OP_RETURN y se rechaza.
 - **OP_RETURN:** sin `--message`, cada envío lleva 90 bytes aleatorios nuevos.
   Con `--message`, ese texto UTF-8, rellenado hasta el mínimo de BTC.
 - **Confirmaciones:** `--min-conf` (1 por defecto). Las monedas con menos
-  confirmaciones esperan a la siguiente ejecución.
-- **Comisión:** la estimación de una hora de la red. Si supera
-  `--max-fee-rate`, la ejecución no envía, registra `skipped` y vuelve a
-  intentar en el próximo ciclo.
+  confirmaciones no entran en el saldo elegible ni en la selección.
+  Tampoco entran los outputs congelados ni los reservados por envíos aún vigentes.
+- **Comisión:** la estimación de una hora de la red, con su mínimo.
+  `--max-fee-rate` se aplica tanto a esa estimación como a la comisión efectiva
+  del plan, incluido cualquier sobrante absorbido como comisión. Si la supera,
+  la ejecución no envía, registra `skipped` y reintenta en el próximo ciclo. Los
+  fondos insuficientes y los importes por debajo del dust también son `skipped`:
+  el monto pedido nunca se reduce.
 - **Intervalo:** `--every` acepta 1, 2, 3, 4, 5, 6, 10, 12, 15, 20 o 30 minutos,
   o 60, 120, 180, 240, 360, 480, 720 o 1440 (horas enteras que dividen el día).
 - **Wallets cifradas:** necesitan `--password-file` con permisos `600`. Se
@@ -246,18 +269,27 @@ datos, y conserva `NODE_EXTRA_CA_CERTS` si estaba definido. La salida de cada
 ejecución se agrega a `~/.local/state/gorila/forward-ID.log` (o
 `$XDG_STATE_HOME/gorila/`).
 
-`list` muestra si cada bloque de cron está `installed` o `missing` y el
-resultado de la última ejecución. `show` agrega la línea de cron, la ruta del log
-y el historial de ejecuciones: `sent` con su txid, `skipped` o `error` con el
-motivo. Los chequeos sin monedas nuevas no se registran; solo actualizan la hora
-del último chequeo. `remove` quita el bloque del crontab y borra la regla y su
+`list` y `show` muestran el origen (`source`, con `from: null` en modo wallet),
+el modo de envío (`mode`), el monto y el umbral, si cada bloque de cron está
+`installed` o `missing` y el resultado de la última ejecución. `show` agrega la
+línea de cron, la ruta del log y el historial: `sent` con su txid y los inputs
+realmente gastados, `skipped` o `error` con el motivo y el saldo observado. Los
+chequeos sin monedas que gastar no se registran; solo actualizan la hora del
+último chequeo cuando se trata de un barrido sin umbral incumplido. Un monto fijo
+sin fondos o un saldo menor o igual al umbral registra `skipped`. Cada ciclo
+vuelve a evaluar la regla: el cambio confirmado puede financiar nuevos envíos.
+Las reglas anteriores conservan origen por dirección, barrido y ausencia de
+umbral, sin alterar sus bloques de cron. `remove` quita el bloque del crontab y borra la regla y su
 historial; el log se conserva.
 
-Dos ejecuciones solapadas de la misma regla no envían dos veces: la segunda sale
-con `busy`. Las monedas ya reenviadas no se vuelven a usar mientras su
-transacción siga en la red. `run --dry-run` muestra el envío que se haría sin
-firmar ni publicar. `GORILA_CRONTAB_BIN` reemplaza el binario `crontab`, para
-pruebas.
+Todas las reglas de una misma wallet y chain comparten una lease persistente: si
+otra ejecución la tiene, la segunda sale con `busy` aunque sea otra regla. La
+lease se renueva mientras dura la ejecución, se recupera si venció y solo la
+libera su propietario; si se pierde, la ejecución no llega a firmar ni publicar.
+Las monedas ya reenviadas no se vuelven a usar mientras su transacción siga en
+la red. `run --dry-run` muestra saldo observado, importe, comisión, inputs y
+cambio sin firmar, publicar, tomar la lease ni guardar la ejecución.
+`GORILA_CRONTAB_BIN` reemplaza el binario `crontab`, para pruebas.
 
 ## Bitcoin regtest
 

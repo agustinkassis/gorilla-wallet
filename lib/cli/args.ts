@@ -1,8 +1,8 @@
 import type { WalletInfo } from "@/lib/wallet"
 
 export class CliError extends Error {}
-const booleanOptions = new Set(["json", "next", "all-wallets", "yes", "include-passphrase", "passphrase", "help", "dry-run"])
-const valueOptions = new Set(["wallet", "chain", "timeout", "name", "words", "seed-file", "password-file", "new-password-file", "passphrase-file", "label", "electrum", "mempool", "to", "amount-sats", "message", "fee-rate", "from", "every", "min-conf", "max-fee-rate", "runs"])
+const booleanOptions = new Set(["json", "next", "all-wallets", "yes", "include-passphrase", "passphrase", "help", "dry-run", "from-wallet"])
+const valueOptions = new Set(["wallet", "chain", "timeout", "name", "words", "seed-file", "password-file", "new-password-file", "passphrase-file", "label", "electrum", "mempool", "to", "amount-sats", "message", "fee-rate", "from", "every", "min-conf", "max-fee-rate", "runs", "balance-above-sats"])
 
 export function parseArgs(argv: readonly string[]) {
   const positionals: string[] = []

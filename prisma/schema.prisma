@@ -144,17 +144,21 @@ model AuthEvent {
   @@index([expiresAt])
 }
 
-/// Unattended forwarding: every run sweeps the confirmed coins of `fromAddress` (a wallet address) to `toAddress`,
-/// with an OP_RETURN (`message`, or 90 fresh random bytes when null). Scheduled by a crontab block per rule.
+/// Unattended forwarding from one address or the entire wallet, with an OP_RETURN and a crontab block per rule.
 model ForwardRule {
   id            String    @id
   walletId      String
   chain         String
-  fromAddress   String
+  /// null spends from any wallet address, including change
+  fromAddress   String?
   toAddress     String
+  /// exact recipient amount; null sweeps the eligible source minus fee
+  amountSats    BigInt?
+  /// strict threshold on eligible wallet-wide balance, not a reserve
+  balanceAboveSats BigInt?
   everyMinutes  Int
   minConf       Int       @default(1)
-  /// sat/vB: a network estimate above it skips the run until the next one
+  /// sat/vB: caps the estimate and effective fee (including absorbed change)
   maxFeeRate    Float
   message       String?
   /// absolute path of the wallet password file (encrypted wallets only)
@@ -164,8 +168,20 @@ model ForwardRule {
   logFile       String
   createdAt     DateTime  @default(now())
   lastCheckedAt DateTime?
-  /// lease held by the run in progress: overlapping cron runs exit without doing anything
+  /// legacy per-rule lease, retained for migration compatibility; ForwardLease now serializes all rules
   runningUntil  DateTime?
+
+  @@index([walletId, chain])
+}
+
+/// Shared forward execution lease. Expired owners cannot renew or release a successor's lease.
+model ForwardLease {
+  walletId  String
+  chain     String
+  owner     String
+  expiresAt DateTime
+
+  @@id([walletId, chain])
 }
 
 /// Forward runs that did something (sent, skipped or failed); idle checks only update lastCheckedAt.
@@ -179,6 +195,8 @@ model ForwardRun {
   amount    BigInt?
   fee       BigInt?
   feeRate   Float?
+  /// eligible wallet balance before fees and source restriction
+  observedBalance BigInt?
   /// JSON [{txid, vout, value}]
   inputs    String   @default("[]")
   dataHex   String?

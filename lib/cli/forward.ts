@@ -1,4 +1,4 @@
-// `gorila forward …`: rules that sweep a wallet address to another address with an OP_RETURN, run by cron.
+// `gorila forward …`: unattended payments with an OP_RETURN, run by cron.
 import { randomBytes } from "node:crypto"
 import { mkdirSync, statSync } from "node:fs"
 import { homedir } from "node:os"
@@ -33,6 +33,8 @@ const iso = (date: Date | null) => date?.toISOString() ?? null
 function ruleResult(rule: ForwardRule, walletName?: string) {
   return {
     id: rule.id, walletId: rule.walletId, wallet: walletName ?? null, chain: rule.chain, from: rule.fromAddress, to: rule.toAddress,
+    source: rule.fromAddress === null ? "wallet" : "address", mode: rule.amountSats === null ? "sweep" : "fixed",
+    amountSats: rule.amountSats === null ? null : Number(rule.amountSats), balanceAboveSats: rule.balanceAboveSats === null ? null : Number(rule.balanceAboveSats),
     everyMinutes: rule.everyMinutes, schedule: schedule(rule.everyMinutes), minConf: rule.minConf, maxFeeRate: rule.maxFeeRate,
     opReturn: rule.message === null ? "random-90" : "message", message: rule.message, passwordFile: rule.passwordFile,
     createdAt: iso(rule.createdAt), lastCheckedAt: iso(rule.lastCheckedAt),
@@ -43,6 +45,7 @@ function runResult(run: ForwardRun) {
   return {
     id: run.id, startedAt: iso(run.startedAt), status: run.status, reason: run.reason, txid: run.txid,
     amount: run.amount === null ? null : Number(run.amount), fee: run.fee === null ? null : Number(run.fee), feeRate: run.feeRate,
+    observedBalance: run.observedBalance === null ? null : Number(run.observedBalance),
     inputs: JSON.parse(run.inputs) as unknown[], dataHex: run.dataHex,
   }
 }
@@ -76,12 +79,23 @@ async function add(args: Args) {
   const wallet = selectWallet(await listWallets(), args.value("wallet"))
   if (wallet.watchOnly) throw new CliError("Watch-only wallets cannot sign")
   const family = familyOf(chain)
-  const from = required(args, "from").trim()
+  const fromWallet = args.flags.has("from-wallet")
+  if ((args.value("from") !== undefined) === fromWallet) throw new CliError("Specify exactly one of --from ADDRESS and --from-wallet")
+  let from = fromWallet ? null : required(args, "from").trim()
   const to = required(args, "to").trim()
   // Compare scripts, not strings: an upper-case bech32 copy of --from would otherwise sweep A to itself every run.
   let same: boolean
-  try { same = bytesToHex(scriptFor(from, chain)) === bytesToHex(scriptFor(to, chain)) } catch (error) { throw new CliError(error instanceof Error ? error.message : String(error)) }
+  let toScript: string
+  try {
+    toScript = bytesToHex(scriptFor(to, chain))
+    same = from !== null && bytesToHex(scriptFor(from, chain)) === toScript
+  } catch (error) { throw new CliError(error instanceof Error ? error.message : String(error)) }
   if (same) throw new CliError("--from and --to are the same address")
+  const amountSats = args.value("amount-sats") === undefined ? null : positiveInteger(args.value("amount-sats"), "amount-sats")
+  const thresholdValue = args.value("balance-above-sats")
+  const balanceAboveSats = thresholdValue === undefined ? null : Number(thresholdValue)
+  if (thresholdValue !== undefined && (!/^\d+$/.test(thresholdValue) || !Number.isSafeInteger(balanceAboveSats) || balanceAboveSats! < 0))
+    throw new CliError("balance-above-sats must be a non-negative safe integer")
   const every = positiveInteger(required(args, "every"), "every")
   const cron = schedule(every)
   const minConfValue = args.value("min-conf") ?? "1"
@@ -108,10 +122,17 @@ async function add(args: Args) {
   const unlocked = wallet.accounts[family] ? wallet : wallet.kind === "seed" && password ? await unlockAccounts(wallet.id, password) : undefined
   if (!unlocked?.accounts[family]) throw new CliError("Wallet has no account on the selected network")
   await signingAccount(wallet.id, family, password)
-  if (!(await db.address.findFirst({ where: { walletId: wallet.id, address: from, family } })))
-    throw new CliError("--from address does not belong to this wallet; run addresses to discover it")
+  const addresses = await db.address.findMany({ where: { walletId: wallet.id, family } })
+  if (from !== null) {
+    const fromScript = bytesToHex(scriptFor(from, chain))
+    const owned = addresses.find((a) => bytesToHex(scriptFor(a.address, chain)) === fromScript)
+    if (!owned) throw new CliError("--from address does not belong to this wallet; run addresses to discover it")
+    from = owned.address
+  } else if (addresses.some((a) => bytesToHex(scriptFor(a.address, chain)) === toScript)) {
+    throw new CliError("--to address belongs to this wallet; wallet forwarding requires an external destination")
+  }
 
-  const review = { wallet: wallet.name, walletId: wallet.id, chain, from, to, everyMinutes: every, schedule: cron, minConf, maxFeeRate, opReturn: message === undefined ? "random-90" : "message", message: message ?? null }
+  const review = { wallet: wallet.name, walletId: wallet.id, chain, from, to, source: fromWallet ? "wallet" : "address", mode: amountSats === null ? "sweep" : "fixed", amountSats, balanceAboveSats, everyMinutes: every, schedule: cron, minConf, maxFeeRate, opReturn: message === undefined ? "random-90" : "message", message: message ?? null }
   process.stderr.write(`${JSON.stringify(review, null, 2)}\n`)
   if (!yes) await confirm("Create this forward rule? Type yes: ", "Cancelled; no forward rule was created")
 
@@ -121,7 +142,7 @@ async function add(args: Args) {
   const env = [`DATABASE_URL=${shellQuote(databaseUrl())}`, ...(process.env.NODE_EXTRA_CA_CERTS ? [`NODE_EXTRA_CA_CERTS=${shellQuote(resolve(process.env.NODE_EXTRA_CA_CERTS))}`] : [])]
   const line = `${cron} ${env.join(" ")} ${shellQuote(process.execPath)} ${shellQuote(resolve("bin/gorila.mjs"))} forward run ${id} --json >> ${shellQuote(logFile)} 2>&1`
   const rule = await db.forwardRule.create({
-    data: { id, walletId: wallet.id, chain, fromAddress: from, toAddress: to, everyMinutes: every, minConf, maxFeeRate, message: message ?? null, passwordFile, cronLine: line, logFile },
+    data: { id, walletId: wallet.id, chain, fromAddress: from, toAddress: to, amountSats: amountSats === null ? null : BigInt(amountSats), balanceAboveSats: balanceAboveSats === null ? null : BigInt(balanceAboveSats), everyMinutes: every, minConf, maxFeeRate, message: message ?? null, passwordFile, cronLine: line, logFile },
   })
   try { installBlock(id, line) } catch (error) {
     await db.forwardRule.delete({ where: { id } })

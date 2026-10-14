@@ -18,6 +18,8 @@ export type SignContext = {
   /** the real spent output on `chain` (from the chain, never from the PSBT) */
   prevOut: (txid: string, vout: number) => Promise<{ script?: Uint8Array; amount?: bigint }>
   frozen: Set<string>
+  /** Optional execution fence, checked after asynchronous validation and before generating any signature. */
+  beforeSign?: () => Promise<void>
 }
 
 /**
@@ -78,6 +80,7 @@ export async function signWith(chain: Chain, psbt: Uint8Array, ctx: SignContext)
 
   const fee = spent.reduce((s, o) => s + o.amount, 0n) - outSum
   if (fee <= 0n) throw new SignError("Outputs exceed inputs")
+  await ctx.beforeSign?.()
 
   if (!CHAINS[chain].unifiedSighash) {
     for (let i = 0; i < keys.length; i++) {
