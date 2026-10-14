@@ -65,6 +65,27 @@ Each wallet has an account per family of networks: mainnet (Bitcoin, Blake) at `
 Testnet3, Signet) at `m/84'/1'/0'`, like Sparrow and Electrum. New wallets get both; a password-protected wallet from
 an earlier version asks for its password once to enable testnets.
 
+### Monitor any address
+
+Watch an address with a mempool.space-compatible WebSocket, without creating a wallet or starting Next.js:
+
+```bash
+nvm use
+node scripts/watch-address.mjs bc1q... --mempool https://your-explorer.example
+```
+
+The monitor prints incoming payments, outgoing movements (net sats), confirmations, mempool removals and a `PONG`
+every 10 seconds (`--interval SECONDS` changes that heartbeat). Existing transactions form a silent baseline;
+duplicate notifications are suppressed. It reconnects automatically and checks REST history after reconnecting
+to recover missed transactions. Recovery is limited to the explorer's recent history, not arbitrarily long offline
+periods. Explorers without `/txs/mempool` use the combined `/txs` history and live WebSocket instead. Stop it with
+`Ctrl+C`. No seed, wallet database or API key is used; your explorer
+must allow unauthenticated access to `/api/address/...` and `/api/v1/ws`.
+
+For a trusted LAN node with a self-signed certificate, prefer installing its CA using `NODE_EXTRA_CA_CERTS`.
+Alternatively, `--insecure` skips certificate verification only for this monitor's connections, without changing
+the wallet's TLS settings. Never use it for an untrusted server. Run `pnpm check:watch` for the isolated monitor checks.
+
 ## Networks
 
 Pick the network in the navbar (top right): **Bitcoin**, **Blake**, **Testnet4**, **Testnet3** or **Signet**, one at a

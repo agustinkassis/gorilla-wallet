@@ -89,6 +89,9 @@ importers:
       tw-animate-css:
         specifier: ^1.4.0
         version: 1.4.0
+      undici:
+        specifier: 7.30.0
+        version: 7.30.0
     devDependencies:
       '@tailwindcss/turbopack':
         specifier: ^4
