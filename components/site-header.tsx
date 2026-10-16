@@ -121,7 +121,7 @@ function NetworkSwitcher() {
   const { chain, settings, snapshots } = useWallet()
   const shown = WEB_CHAIN_IDS.filter((c) => c === chain || !settings.hidden.includes(c))
   const change = async (next: string) => {
-    if (!isChain(next) || next === chain || CHAINS[next].soon) return
+    if (!isChain(next) || next === chain) return
     try {
       await api("/api/settings", { chain: next })
     } catch (e) {
@@ -140,26 +140,27 @@ function NetworkSwitcher() {
       <DropdownMenuContent align="end" className="w-64">
         <DropdownMenuLabel className="text-xs text-muted-foreground">Network</DropdownMenuLabel>
         <DropdownMenuRadioGroup value={chain} onValueChange={change}>
-          {shown.filter((c) => !CHAINS[c].soon).map((c) => (
-            <DropdownMenuRadioItem key={c} value={c} className="gap-2">
-              <span className={cn("size-2 rounded-full", CHAINS[c].bg)} />
-              <span className="flex-1">{CHAINS[c].label}</span>
-              <span className="font-mono text-xs text-muted-foreground">{CHAINS[c].unit}</span>
-            </DropdownMenuRadioItem>
-          ))}
+          {shown.map((c) =>
+            CHAINS[c].soon ? (
+              <DropdownMenuRadioItem key={c} value={c} className="items-start gap-2">
+                <span className={cn("mt-1.5 size-2 shrink-0 rounded-full", CHAINS[c].bg)} />
+                <span className="flex flex-1 flex-col">
+                  <span className="flex items-center gap-1.5">
+                    {CHAINS[c].label} <Badge variant="outline" className="px-1.5 py-0 text-[10px]">Soon</Badge>
+                  </span>
+                  <span className="text-xs text-muted-foreground tabular-nums">{forkCountdown(c, snapshots.btc?.height)}</span>
+                </span>
+                <span className="font-mono text-xs text-muted-foreground">{CHAINS[c].unit}</span>
+              </DropdownMenuRadioItem>
+            ) : (
+              <DropdownMenuRadioItem key={c} value={c} className="gap-2">
+                <span className={cn("size-2 rounded-full", CHAINS[c].bg)} />
+                <span className="flex-1">{CHAINS[c].label}</span>
+                <span className="font-mono text-xs text-muted-foreground">{CHAINS[c].unit}</span>
+              </DropdownMenuRadioItem>
+            ),
+          )}
         </DropdownMenuRadioGroup>
-        {shown.filter((c) => CHAINS[c].soon).map((c) => (
-          <DropdownMenuLabel key={c} className="flex items-start gap-2 pr-8 text-sm font-normal text-foreground">
-            <span className={cn("mt-1.5 size-2 shrink-0 rounded-full opacity-60", CHAINS[c].bg)} />
-            <span className="flex flex-1 flex-col">
-              <span className="flex items-center gap-1.5 opacity-70">
-                {CHAINS[c].label} <Badge variant="outline" className="px-1.5 py-0 text-[10px]">Soon</Badge>
-              </span>
-              <span className="text-xs text-muted-foreground tabular-nums">{forkCountdown(c, snapshots.btc?.height)}</span>
-            </span>
-            <span className="font-mono text-xs text-muted-foreground">{CHAINS[c].unit}</span>
-          </DropdownMenuLabel>
-        ))}
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
           <Link href="/settings">

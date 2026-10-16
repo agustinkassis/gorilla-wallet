@@ -55,7 +55,7 @@ export function StatusDot({ on, className }: { on: boolean; className?: string }
 export function AppSidebar() {
   const pathname = usePathname()
   const { setOpenMobile } = useSidebar()
-  const { snapshots, live, chains, chain: active, settings } = useWallet()
+  const { snapshots, live, chains, chain: active, settings, pairs } = useWallet()
   const incoming = pendingIncoming({ [active]: snapshots[active] }).length
   const apps = viewsFor(settings.modules, active, "page")
 
@@ -121,7 +121,8 @@ export function AppSidebar() {
 
       <SidebarFooter>
         <SidebarMenu>
-          {chains.map((chain) => {
+          {/* a chain that hasn't launched shows the one actually syncing (its replay pair) */}
+          {(CHAINS[active].soon ? pairs : chains).map((chain) => {
             const s = snapshots[chain]
             const on = live && !!s?.connected
             return (

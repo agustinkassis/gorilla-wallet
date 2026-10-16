@@ -575,7 +575,8 @@ export const onSyncsChange = (l: () => void) => (changeListeners.add(l), () => v
 export async function syncWatchers() {
   const [settings, wallets] = await Promise.all([getSettings(), listWallets()])
   const chains = (g.chains ??= {})
-  const want = syncedChains(settings.chain)
+  // a chain that hasn't launched has no servers yet: selecting it syncs its replay pair (eCash: Bitcoin) only
+  const want = syncedChains(settings.chain).filter((c) => !CHAINS[c].soon)
   let changed = false
   for (const chain of CHAIN_IDS) {
     const { electrum, mempool } = config.sources(chain, settings)
