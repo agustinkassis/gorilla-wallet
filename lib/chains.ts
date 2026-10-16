@@ -35,7 +35,7 @@ export type ChainDef = {
   replayLockTime?: boolean
   /** the block it forks from its replay pair at */
   forkHeight?: number
-  /** not launched yet: listed with a countdown to forkHeight, can't be selected or synced */
+  /** not launched yet (no servers): selecting it shows the countdown to forkHeight and what the snapshot would credit */
   soon?: boolean
   /**
    * BIP300 sidechain deposits (M5): the byte this chain's build uses for OP_DRIVECHAIN, and default enforcers
@@ -83,36 +83,6 @@ export const CHAINS: Record<Chain, ChainDef> = {
     noDataOutputs: true,
     replayPair: "btc",
   },
-  ecx: {
-    label: "eCash",
-    unit: "ECX",
-    text: "text-blue-600 dark:text-blue-400",
-    bg: "bg-blue-500",
-    family: "main",
-    // servers are announced at launch
-    electrum: [],
-    mempool: [],
-    replayPair: "btc",
-    replayLockTime: true,
-    forkHeight: 973_728,
-    soon: true,
-    // drivechain: add at launch, once its build's OP_DRIVECHAIN byte and a public enforcer are known
-  },
-  pecx: {
-    label: "eCash Beta",
-    unit: "pECX",
-    text: "text-sky-600 dark:text-sky-400",
-    bg: "bg-sky-500",
-    family: "main",
-    electrum: ["ssl://explorer.beta.ecash.ninja:50002"],
-    mempool: ["https://explorer.beta.ecash.ninja"],
-    // LayerTwo Labs' betanet: Bitcoin Core 31.1 + BIP300/301 drivechains (magic 0xeca5b104, P2P seed.beta.ecash.ninja:8533)
-    replayPair: "btc",
-    replayLockTime: true,
-    forkHeight: 967_680,
-    // betanet moved OP_DRIVECHAIN from BIP300's OP_NOP5 (0xb4) to OP_NOP8 (bip300301_enforcer NetworkParams::betanet)
-    drivechain: { opcode: 0xb7, enforcer: ["https://enforcer.beta.ecash.ninja"] },
-  },
   tbtc4: {
     label: "Testnet4",
     unit: "tBTC",
@@ -139,6 +109,36 @@ export const CHAINS: Record<Chain, ChainDef> = {
     family: "test",
     electrum: ["ssl://mempool.space:60602"],
     mempool: ["https://mempool.space/signet"],
+  },
+  pecx: {
+    label: "eCash Beta",
+    unit: "pECX",
+    text: "text-sky-600 dark:text-sky-400",
+    bg: "bg-sky-500",
+    family: "main",
+    electrum: ["ssl://explorer.beta.ecash.ninja:50002"],
+    mempool: ["https://explorer.beta.ecash.ninja"],
+    // LayerTwo Labs' betanet: Bitcoin Core 31.1 + BIP300/301 drivechains (magic 0xeca5b104, P2P seed.beta.ecash.ninja:8533)
+    replayPair: "btc",
+    replayLockTime: true,
+    forkHeight: 967_680,
+    // betanet moved OP_DRIVECHAIN from BIP300's OP_NOP5 (0xb4) to OP_NOP8 (bip300301_enforcer NetworkParams::betanet)
+    drivechain: { opcode: 0xb7, enforcer: ["https://enforcer.beta.ecash.ninja"] },
+  },
+  ecx: {
+    label: "eCash",
+    unit: "ECX",
+    text: "text-blue-600 dark:text-blue-400",
+    bg: "bg-blue-500",
+    family: "main",
+    // servers are announced at launch
+    electrum: [],
+    mempool: [],
+    replayPair: "btc",
+    replayLockTime: true,
+    forkHeight: 973_728,
+    soon: true,
+    // drivechain: add at launch, once its build's OP_DRIVECHAIN byte and a public enforcer are known
   },
 }
 export const CHAIN_IDS = Object.keys(CHAINS) as Chain[]

@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { usePathname } from "next/navigation"
 import { KeyRoundIcon, Loader2Icon, NetworkIcon, ShieldAlertIcon, ZapIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -8,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useNostr } from "@/components/nostr-provider"
 import { AddWalletFlow } from "@/components/add-wallet"
 import { Input } from "@/components/ui/input"
+import { SnapshotPreview } from "@/components/snapshot-preview"
 import { useWallet } from "@/components/wallet-provider"
 import { api } from "@/lib/api"
 import { CHAINS, FAMILIES } from "@/lib/wallet"
@@ -15,7 +17,8 @@ import { CHAINS, FAMILIES } from "@/lib/wallet"
 /** Shows the page only once logged in and authorized; otherwise a connect/error card. */
 export function Gate({ children }: { children: React.ReactNode }) {
   const { pubkey, required, login, logout } = useNostr()
-  const { error, retry, ready, wallets, selectWallet, wallet, account } = useWallet()
+  const { error, retry, ready, wallets, selectWallet, wallet, account, chain } = useWallet()
+  const pathname = usePathname()
 
   // Login state unknown (server render / hydration): pages render their own loading skeletons.
   if (pubkey === undefined || required === undefined) return children
@@ -70,6 +73,9 @@ export function Gate({ children }: { children: React.ReactNode }) {
     )
 
   if (ready && wallet && !account) return <EnableNetwork />
+
+  // not launched yet: every page is the countdown and the snapshot preview (Settings stays reachable)
+  if (CHAINS[chain].soon && pathname !== "/settings") return <SnapshotPreview chain={chain} />
 
   return children
 }

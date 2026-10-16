@@ -439,7 +439,7 @@ const throws = async (fn: () => unknown, re: RegExp) => {
   await throws(() => moduleFetch(modA, { url: "https://user@api.example.org/" }), /isn't one of/)
   await throws(() => moduleFetch(modA, { url: "https://api.example.org/", headers: { Cookie: "a=b" } }), /Header not allowed/)
   await throws(() => moduleFetch(modA, { url: "https://api.example.org/", method: "PATCH" as "GET" }), /not allowed/)
-  assert.throws(() => parseSettings({ chain: "ecx" }), /Invalid setting/, "eCash mainnet can't be selected before it launches")
+  assert.deepEqual(parseSettings({ chain: "ecx" }), { chain: "ecx" }, "eCash mainnet is selectable before it launches (snapshot preview)")
 
   // --- labels: one chain each, address refs checked against that chain's network ---------------
   assert.ok(validRef("addr", "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", "btc"))

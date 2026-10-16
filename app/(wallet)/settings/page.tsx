@@ -227,11 +227,7 @@ function NetworksCard() {
                   <Button variant="outline" size="sm" onClick={() => setEditing(editing === c ? null : c)}>
                     Sources{src?.custom ? " · custom" : ""}
                   </Button>
-                  {def.soon ? (
-                    <Button size="sm" variant="outline" disabled title={`Launches ${forkCountdown(c, snapshots.btc?.height)}`}>
-                      Soon
-                    </Button>
-                  ) : c === active ? (
+                  {c === active ? (
                     <Button size="sm" variant="secondary" disabled>
                       <CheckIcon /> Selected
                     </Button>
