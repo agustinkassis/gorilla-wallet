@@ -8,7 +8,7 @@ import { secp256k1 } from "@noble/curves/secp256k1.js"
 import { sha256 } from "@noble/hashes/sha2.js"
 import { bytesToHex, hexToBytes, utf8ToBytes } from "@noble/hashes/utils.js"
 import { finalizeEvent, generateSecretKey, getPublicKey, nip98 } from "nostr-tools"
-import { REPLAY_LOCKTIME, familyPath, minDataScript, replayPairs, syncedChains } from "../lib/chains"
+import { CHAINS, familyPath, minDataScript, replayPairs, syncedChains } from "../lib/chains"
 import { amountInput, deriveAddresses, displayXpub, formatAmount, nextUnused, normalizeXpub, parseAccountKey, parseAmount, parseCoins, scriptHash, txEvents, type Snapshot, type Tx } from "../lib/wallet"
 import { db } from "../lib/server/db"
 import { WrongPasswordError, isLocked, seal, unseal } from "../lib/server/secret"
@@ -217,7 +217,7 @@ const throws = async (fn: () => unknown, re: RegExp) => {
     ...overrides,
   })
   const fundCoin: Coin = { txid: fundingId, vout: 0, value: 100_000, address: addr0, change: 0, index: 0, height: 100 }
-  const psbtFor = (chain: "btc" | "xbt" | "pecx", data?: Uint8Array) => {
+  const psbtFor = (chain: "btc" | "xbt" | "pecx" | "ecx", data?: Uint8Array) => {
     const plan = planTx({ chain, recipients: [{ address: dest, amount: 40_000 }], candidates: [fundCoin], fee: feeAt(3), changeAddress: change0, data })
     return buildPsbt(plan, { chain, xpub, fingerprint: master.fingerprint, accountPath: "m/84'/0'/0'", tipHeight: 970_000 }).toPSBT()
   }
@@ -255,7 +255,7 @@ const throws = async (fn: () => unknown, re: RegExp) => {
   // eCash: plain SIGHASH_ALL, replay-protected by nLockTime 499,999,999 (final there, never final on Bitcoin)
   const pecx = await signWith("pecx", psbtFor("pecx"), ctx())
   signed = Transaction.fromRaw(hexToBytes(pecx.hex), { allowUnknownOutputs: true })
-  assert.equal(signed.lockTime, REPLAY_LOCKTIME)
+  assert.equal(signed.lockTime, 499_999_999)
   assert.equal(signed.getInput(0).sequence, 0xfffffffd, "a non-final input makes the locktime bind")
   assert.equal(signed.getInput(0).finalScriptWitness![0].at(-1), SigHash.ALL)
   validateBroadcast("pecx", pecx.hex)
@@ -264,6 +264,14 @@ const throws = async (fn: () => unknown, re: RegExp) => {
   await throws(() => signWith("pecx", psbtFor("btc"), ctx()), /must use nLockTime 499999999/) // a client that skipped the protection
   assert.deepEqual(replayPairs("btc"), ["xbt", "pecx", "ecx"], "Bitcoin replays onto Blake, eCash Beta and eCash")
   assert.deepEqual(syncedChains("ecx"), ["ecx", "btc"])
+  // mainnet's replay nLockTime is 499,999,998: betanet's (499,999,999) isn't final there, nor mainnet's on betanet
+  assert.equal(CHAINS.ecx.replayLockTime, 499_999_998)
+  const ecx = await signWith("ecx", psbtFor("ecx"), ctx())
+  assert.equal(Transaction.fromRaw(hexToBytes(ecx.hex), { allowUnknownOutputs: true }).lockTime, 499_999_998)
+  validateBroadcast("ecx", ecx.hex)
+  await throws(() => validateBroadcast("pecx", ecx.hex), /must use nLockTime 499999999/)
+  await throws(() => validateBroadcast("ecx", pecx.hex), /must use nLockTime 499999998/)
+  await throws(() => validateBroadcast("btc", ecx.hex), /eCash's replay protection/)
   assert.deepEqual(syncedChains("pecx"), ["pecx", "btc"])
   assert.equal(minDataScript("btc"), 84)
   assert.equal(minDataScript("pecx"), 0, "eCash has no OP_RETURN cap to pin a tx with")
@@ -329,7 +337,7 @@ const throws = async (fn: () => unknown, re: RegExp) => {
     ctx({ prevOut: async (txid, vout) => (txid === ctip.txid ? treasuryTx : funding).getOutput(vout), sidechain: sidechainAt(c), ...overrides })
   const dep = await signWith("pecx", depositPsbt(dp), depositCtx())
   const depTx = parseTxHex(dep.hex)
-  assert.equal(depTx.lockTime, REPLAY_LOCKTIME, "deposits keep eCash's replay protection")
+  assert.equal(depTx.lockTime, 499_999_999, "deposits keep eCash's replay protection")
   assert.ok(!depTx.getInput(0).finalScriptSig?.length && !depTx.getInput(0).finalScriptWitness?.length, "treasury: empty scriptSig and witness")
   assert.equal(depTx.getInput(1).finalScriptWitness!.length, 2)
   assert.deepEqual({ ...depositOf("pecx", depTx)!, address: new TextDecoder().decode(depositOf("pecx", depTx)!.address) }, { slot: 9, vout: 0, value: 5_030_000n, address: "XDkeumzBpQ6maGeadmnho4JE4UF" })

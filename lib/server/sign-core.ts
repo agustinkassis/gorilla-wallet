@@ -4,7 +4,7 @@ import { bytesToHex, concatBytes } from "@noble/hashes/utils.js"
 import { SigHash, Transaction, bip32Path, p2pkh, p2wpkh } from "@scure/btc-signer"
 import { PlanError, depositOf, drivechainScript, hasReplayLockTime, outputRuleError, vsizeOf, type Ctip } from "@/lib/tx"
 import { SIGHASH_ALL_UNIFIED, unifiedSighash } from "@/lib/unified-sighash"
-import { CHAINS, REPLAY_LOCKTIME, type Chain } from "@/lib/chains"
+import { CHAINS, type Chain } from "@/lib/chains"
 
 export class SignError extends Error {}
 
@@ -38,8 +38,9 @@ export async function signWith(chain: Chain, psbt: Uint8Array, ctx: SignContext)
     throw new SignError("Invalid PSBT")
   }
   if (!tx.inputsLength || !tx.outputsLength) throw new SignError("PSBT has no inputs or outputs")
-  if (CHAINS[chain].replayLockTime && !hasReplayLockTime(tx))
-    throw new SignError(`${CHAINS[chain].label} transactions must use nLockTime ${REPLAY_LOCKTIME} with RBF/non-final inputs (replay protection)`)
+  const lock = CHAINS[chain].replayLockTime
+  if (lock && !hasReplayLockTime(tx, lock))
+    throw new SignError(`${CHAINS[chain].label} transactions must use nLockTime ${lock} with RBF/non-final inputs (replay protection)`)
 
   let outSum = 0n
   for (let i = 0; i < tx.outputsLength; i++) {

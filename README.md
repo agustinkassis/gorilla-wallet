@@ -132,9 +132,10 @@ activates drivechains (BIP300/301). Keys and addresses are Bitcoin's: the same w
   mempool.space-shaped, so it isn't a source), P2P `seed.beta.ecash.ninja:8533`, magic `0xeca5b104`.
 - **eCash (ECX)**: mainnet, live since 2026-10-29, forked at block 973,728. Electrum `ssl://explorer.ecash.ninja:50002`
   (`tcp://…:50001` fallback), explorer/API `https://explorer.ecash.ninja` (mempool.space-compatible).
-- eCash sends use **nLockTime 499,999,999** (`LOCKTIME_THRESHOLD - 1`) with RBF inputs: eCash treats it as final,
-  Bitcoin (and Blake) as a block ~500M blocks away, so they never confirm there. The signer and broadcast refuse an
-  eCash transaction without it.
+- eCash sends use a replay **nLockTime** with RBF inputs: **499,999,998** on eCash, **499,999,999**
+  (`LOCKTIME_THRESHOLD - 1`) on eCash Beta (LayerTwo Labs' network catalog). Each network treats its own as final;
+  Bitcoin, Blake and the other eCash network read it as a block ~500M blocks away, so it never confirms there. The signer
+  and broadcast refuse an eCash transaction without its network's value.
 - Nothing marks a Bitcoin transaction as invalid on eCash. **Not replayable on eCash Beta** (Bitcoin sends) instead
   spends at least one coin eCash lacks (received after the fork, or already split there), so eCash rejects the whole
   transaction. On eCash, **Split coins** sends your coins still shared with Bitcoin to yourself, protected: afterwards
@@ -142,9 +143,15 @@ activates drivechains (BIP300/301). Keys and addresses are Bitcoin's: the same w
 - **Deposit to a sidechain** (Send → *Deposit to a sidechain*, BIP300 M5): paste a sidechain deposit address
   (`s9_<address>_<checksum>` from Thunder, BitNames, BitAssets, Photon…). The transaction spends the sidechain's
   treasury (CTIP, unsigned) with your coins into a new treasury holding both, followed by an OP_RETURN with the sidechain
-  address. Active slots and treasuries come from a bip300301_enforcer (`PECX_ENFORCER`, default
-  `https://enforcer.beta.ecash.ninja`); the signer refuses inactive slots (their output would be anyone-can-spend) and
-  stale treasuries. Betanet's OP_DRIVECHAIN is OP_NOP8 (`0xb7`), not BIP300's OP_NOP5.
+  address. Active slots and treasuries come from a bip300301_enforcer (`ECX_ENFORCER`, default
+  `https://seed.ecash.eu.com/enforcer`; `PECX_ENFORCER`, default `https://enforcer.beta.ecash.ninja`); the signer
+  refuses inactive slots (their output would be anyone-can-spend) and stale treasuries. Every eCash network's
+  OP_DRIVECHAIN is OP_NOP8 (`0xb7`), not BIP300's OP_NOP5.
+- **Drivechains** (sidebar, on eCash and eCash Beta): the active sidechains with their treasuries, slot proposals and
+  their votes, and guided flows. **Peg in** checks the sidechain's deposit address (slot and checksum) and opens Send
+  with it, and lists your past deposits there. **Peg out** starts in the sidechain's wallet: copy a fresh, labeled
+  address here, withdraw to it there, then follow the sidechain's withdrawal bundles (collecting acks, paid, failed) until
+  miners approve them (eCash: 6,048 acks within 12,096 blocks) and the payout arrives.
 
 ## Configuration
 
@@ -156,7 +163,7 @@ Copy `.env.example` to `.env` only to change a default.
 | `DERIVATION_PATH` | Its account path, default `m/84'/0'/0'` (P2WPKH) |
 | `ALLOWED_PUBKEYS` | Optional npub/hex allowlist. Set: every API call needs a NIP-98 login from one of these keys. Unset: no login, localhost only |
 | `<CHAIN>_ELECTRUM` | Comma-separated `tcp://` / `ssl://` Electrum servers, tried in order (`BTC_ELECTRUM`, `XBT_ELECTRUM`, `PECX_ELECTRUM`, `TBTC4_ELECTRUM`, …). Settings → Networks overrides it |
-| `<CHAIN>_ENFORCER` | BIP300 enforcers (Connect/HTTP) for sidechain deposits, comma-separated (`PECX_ENFORCER`) |
+| `<CHAIN>_ENFORCER` | BIP300 enforcers (Connect/HTTP) for sidechains, comma-separated (`ECX_ENFORCER`, `PECX_ENFORCER`) |
 | `ELECTRUM_SELF_SIGNED` | Comma-separated Electrum hosts whose `ssl://` certificate isn't verified (a self-signed node you trust). Every other `ssl://` server needs a valid certificate |
 | `MEMPOOL_<CHAIN>_URL` | mempool.space-compatible APIs: fees, broadcast, explorer links (`MEMPOOL_BTC_URL`, …) |
 | `DATABASE_URL` | SQLite file (default `file:./data/wallet.db`) |

@@ -31,7 +31,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { TxDialog, autoCandidates, coinsOf, useTxFlow } from "@/components/tx-dialog"
 import { ModuleFrame } from "@/components/module-frame"
 import { viewsFor } from "@/modules"
-import { REPLAY_LOCKTIME, dataCapPair, minDataScript, replayPairs } from "@/lib/chains"
+import { dataCapPair, minDataScript, replayPairs } from "@/lib/chains"
 import { RecipientAddress } from "@/components/recipient-address"
 import { shorten } from "@/components/site-header"
 import { useWallet } from "@/components/wallet-provider"
@@ -77,7 +77,7 @@ const PRESETS: { key: FeePreset; label: string }[] = [
   { key: "economyFee", label: "Economy" },
 ]
 
-type Mode = { kind: "send" } | { kind: "deposit" } | { kind: "bump"; txid: string } | { kind: "cpfp"; outpoint: string }
+type Mode = { kind: "send" } | { kind: "deposit"; to?: string } | { kind: "bump"; txid: string } | { kind: "cpfp"; outpoint: string }
 type Sidechain = { slot: number; title: string; ctip: Ctip | null }
 
 const outpoint = (c: { txid: string; vout: number }) => `${c.txid}:${c.vout}`
@@ -102,7 +102,7 @@ function Send() {
     : params.get("cpfp")
       ? { kind: "cpfp", outpoint: params.get("cpfp")! }
       : params.get("deposit") && CHAINS[chain].drivechain
-        ? { kind: "deposit" }
+        ? { kind: "deposit", to: params.get("to") ?? undefined }
         : { kind: "send" }
   // transaction types: a plain payment, or one a module adds (its view runs sandboxed and proposes the tx)
   const types = mode.kind === "send" ? viewsFor(wallet.settings.modules, chain, "send") : []
@@ -167,7 +167,8 @@ function SendForm({ chain, snap, mode, preselect }: { chain: Chain; snap: Snapsh
   const shared = useMemo(() => new Map(replayPairs(chain).map((p) => [p, sharedOutpoints(wallet.snapshots, chain, p)])), [wallet.snapshots, chain])
   const changeAddress = (nextUnused(wallet.snapshots, 1) ?? snap.addresses.find((a) => a.change === 1))?.address ?? ""
 
-  const [recipients, setRecipients] = useState([{ address: "", amount: "" }])
+  // deposit from the Drivechains page: its sidechain address comes prefilled
+  const [recipients, setRecipients] = useState([{ address: mode.kind === "deposit" ? (mode.to ?? "") : "", amount: "" }])
   // Amounts are typed in the display unit; when the switch flips, re-express what's typed so it keeps its value.
   const unit = useUnit()
   const [typedIn, setTypedIn] = useState(unit)
@@ -607,7 +608,7 @@ function SendForm({ chain, snap, mode, preselect }: { chain: Chain; snap: Snapsh
                 <Switch checked={coinGuard} disabled={!editable} onCheckedChange={setCoinGuard} aria-label={`Not replayable on ${CHAINS[coinPair].label}`} />
               </CardTitle>
               <CardDescription>
-                eCash&apos;s replay protection (nLockTime {REPLAY_LOCKTIME}) only marks eCash transactions; nothing marks a {meta.label} one. So this
+                eCash&apos;s replay protection (nLockTime {CHAINS[coinPair].replayLockTime}) only marks eCash transactions; nothing marks a {meta.label} one. So this
                 spends at least one coin {CHAINS[coinPair].label} doesn&apos;t have (received after its fork at block{" "}
                 {CHAINS[coinPair].forkHeight?.toLocaleString()}, or already split there), and {CHAINS[coinPair].label} rejects the whole transaction.
               </CardDescription>
@@ -732,7 +733,7 @@ function SendForm({ chain, snap, mode, preselect }: { chain: Chain; snap: Snapsh
             <AlertDescription>
               {meta.unifiedSighash
                 ? `Signed with SIGHASH_UNIFIED (0x21), which ${pairs.map((p) => CHAINS[p].label).join(" and ") || "other chains"} rejects, so this only moves ${meta.label} coins. External signers need SIGHASH_UNIFIED support (Bitcoin Knots 29.4.1+).`
-                : `nLockTime ${REPLAY_LOCKTIME.toLocaleString()} is final on ${meta.label}, but Bitcoin reads it as a block ~500M blocks away and never accepts it, so this only moves ${meta.label} coins.`}
+                : `nLockTime ${meta.replayLockTime!.toLocaleString()} is final on ${meta.label}, but Bitcoin reads it as a block ~500M blocks away and never accepts it, so this only moves ${meta.label} coins.`}
             </AlertDescription>
           </Alert>
         ) : (

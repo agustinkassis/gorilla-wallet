@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { ArrowDownLeftIcon, ArrowLeftRightIcon, ArrowUpRightIcon, CoinsIcon, LayoutDashboardIcon, PuzzleIcon, SettingsIcon } from "lucide-react"
+import { ArrowDownLeftIcon, ArrowLeftRightIcon, ArrowUpRightIcon, CoinsIcon, LayersIcon, LayoutDashboardIcon, PuzzleIcon, SettingsIcon } from "lucide-react"
 import {
   Sidebar,
   SidebarContent,
@@ -30,6 +30,8 @@ export const NAV = [
   { href: "/receive", title: "Receive", icon: ArrowDownLeftIcon },
   { href: "/transactions", title: "Transactions", icon: ArrowLeftRightIcon, showsIncoming: true },
   { href: "/utxos", title: "UTXOs", icon: CoinsIcon },
+  // BIP300 chains only (eCash)
+  { href: "/drivechains", title: "Drivechains", icon: LayersIcon, drivechain: true },
   { href: "/settings", title: "Settings", icon: SettingsIcon },
 ]
 
@@ -70,7 +72,7 @@ export function AppSidebar() {
           <SidebarGroupLabel>Wallet</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {NAV.map((item) => (
+              {NAV.filter((item) => !item.drivechain || CHAINS[active].drivechain).map((item) => (
                 <SidebarMenuItem key={item.href}>
                   <SidebarMenuButton
                     asChild
