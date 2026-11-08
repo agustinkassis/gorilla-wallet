@@ -67,10 +67,9 @@ an earlier version asks for its password once to enable testnets.
 
 ## Networks
 
-Pick the network in the navbar (top right): **Bitcoin**, **Blake**, **eCash Beta**, **Testnet4**, **Testnet3** or
-**Signet**, one at a time. A fork's replay pairs sync along in the background (on Bitcoin, Blake and eCash Beta too; on
-a fork, Bitcoin), so replay checks and the replay guards always have both chains. **eCash** (mainnet) is listed as
-*Soon* with a countdown to its fork block.
+Pick the network in the navbar (top right): **Bitcoin**, **Blake**, **eCash**, **eCash Beta**, **Testnet4**,
+**Testnet3** or **Signet**, one at a time. A fork's replay pairs sync along in the background (on Bitcoin, Blake, eCash
+and eCash Beta too; on a fork, Bitcoin), so replay checks and the replay guards always have both chains.
 
 Every chain is data in [`lib/chains.ts`](lib/chains.ts): address family, colors, default sources, and features such as
 SIGHASH_UNIFIED replay protection, consensus output limits and its replay pair. Adding a chain is adding an entry.
@@ -131,8 +130,8 @@ activates drivechains (BIP300/301). Keys and addresses are Bitcoin's: the same w
 - **eCash Beta (pECX)**: the betanet, forked at block 967,680, practice coins. Electrum
   `ssl://explorer.beta.ecash.ninja:50002`, explorer/API `https://explorer.beta.ecash.ninja` (its Esplora API isn't
   mempool.space-shaped, so it isn't a source), P2P `seed.beta.ecash.ninja:8533`, magic `0xeca5b104`.
-- **eCash (ECX)**: mainnet, *Soon*: forks at block ~973,728 (~2026-10-31). The navbar counts down from Bitcoin's tip;
-  it becomes selectable once a release adds its servers.
+- **eCash (ECX)**: mainnet, live since 2026-10-29, forked at block 973,728. Electrum `ssl://explorer.ecash.ninja:50002`
+  (`tcp://…:50001` fallback), explorer/API `https://explorer.ecash.ninja` (mempool.space-compatible).
 - eCash sends use **nLockTime 499,999,999** (`LOCKTIME_THRESHOLD - 1`) with RBF inputs: eCash treats it as final,
   Bitcoin (and Blake) as a block ~500M blocks away, so they never confirm there. The signer and broadcast refuse an
   eCash transaction without it.

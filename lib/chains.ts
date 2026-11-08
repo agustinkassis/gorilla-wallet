@@ -131,13 +131,12 @@ export const CHAINS: Record<Chain, ChainDef> = {
     text: "text-blue-600 dark:text-blue-400",
     bg: "bg-blue-500",
     family: "main",
-    // servers are announced at launch
-    electrum: [],
-    mempool: [],
+    // LayerTwo Labs' public Fulcrum and mempool.space-compatible explorer (launched 2026-10-29)
+    electrum: ["ssl://explorer.ecash.ninja:50002", "tcp://explorer.ecash.ninja:50001"],
+    mempool: ["https://explorer.ecash.ninja"],
     replayPair: "btc",
     replayLockTime: true,
     forkHeight: 973_728,
-    soon: true,
     // drivechain: add at launch, once its build's OP_DRIVECHAIN byte and a public enforcer are known
   },
 }

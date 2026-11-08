@@ -262,7 +262,8 @@ const throws = async (fn: () => unknown, re: RegExp) => {
   await throws(() => validateBroadcast("btc", pecx.hex), /eCash's replay protection/)
   await throws(() => validateBroadcast("pecx", btc.hex), /must use nLockTime 499999999/)
   await throws(() => signWith("pecx", psbtFor("btc"), ctx()), /must use nLockTime 499999999/) // a client that skipped the protection
-  assert.deepEqual(replayPairs("btc"), ["xbt", "pecx"], "Bitcoin replays onto Blake and eCash Beta; eCash mainnet isn't live yet")
+  assert.deepEqual(replayPairs("btc"), ["xbt", "pecx", "ecx"], "Bitcoin replays onto Blake, eCash Beta and eCash")
+  assert.deepEqual(syncedChains("ecx"), ["ecx", "btc"])
   assert.deepEqual(syncedChains("pecx"), ["pecx", "btc"])
   assert.equal(minDataScript("btc"), 84)
   assert.equal(minDataScript("pecx"), 0, "eCash has no OP_RETURN cap to pin a tx with")
