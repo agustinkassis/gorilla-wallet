@@ -180,7 +180,7 @@ const throws = async (fn: () => unknown, re: RegExp) => {
     /not allowed on Blake/,
   )
   // eCash guard: spend a coin eCash lacks, adding the smallest when the best plan has none
-  const guard = (lacking: Coin[]) => ({ coins: lacking, pair: "pecx" as const })
+  const guard = (lacking: Coin[]) => ({ coins: lacking, pair: "ecx" as const })
   p = planTx({ chain: "btc", recipients: [{ address: dest, amount: 10_000 }], candidates: coins, fee: feeAt(2), changeAddress: change0, guard: guard([coins[1]]) })
   assert.deepEqual(p.inputs.map((c) => c.value), [20_000], "already guarded: unchanged")
   p = planTx({ chain: "btc", recipients: [{ address: dest, amount: 10_000 }], candidates: coins, fee: feeAt(2), changeAddress: change0, guard: guard([coins[2], coins[0]]) })
@@ -217,7 +217,7 @@ const throws = async (fn: () => unknown, re: RegExp) => {
     ...overrides,
   })
   const fundCoin: Coin = { txid: fundingId, vout: 0, value: 100_000, address: addr0, change: 0, index: 0, height: 100 }
-  const psbtFor = (chain: "btc" | "xbt" | "pecx" | "ecx", data?: Uint8Array) => {
+  const psbtFor = (chain: "btc" | "xbt" | "ecx", data?: Uint8Array) => {
     const plan = planTx({ chain, recipients: [{ address: dest, amount: 40_000 }], candidates: [fundCoin], fee: feeAt(3), changeAddress: change0, data })
     return buildPsbt(plan, { chain, xpub, fingerprint: master.fingerprint, accountPath: "m/84'/0'/0'", tipHeight: 970_000 }).toPSBT()
   }
@@ -252,29 +252,25 @@ const throws = async (fn: () => unknown, re: RegExp) => {
     "…and not against Bitcoin's BIP143 message for the same byte (replay protection)",
   )
 
-  // eCash: plain SIGHASH_ALL, replay-protected by nLockTime 499,999,999 (final there, never final on Bitcoin)
-  const pecx = await signWith("pecx", psbtFor("pecx"), ctx())
-  signed = Transaction.fromRaw(hexToBytes(pecx.hex), { allowUnknownOutputs: true })
-  assert.equal(signed.lockTime, 499_999_999)
-  assert.equal(signed.getInput(0).sequence, 0xfffffffd, "a non-final input makes the locktime bind")
-  assert.equal(signed.getInput(0).finalScriptWitness![0].at(-1), SigHash.ALL)
-  validateBroadcast("pecx", pecx.hex)
-  await throws(() => validateBroadcast("btc", pecx.hex), /eCash's replay protection/)
-  await throws(() => validateBroadcast("pecx", btc.hex), /must use nLockTime 499999999/)
-  await throws(() => signWith("pecx", psbtFor("btc"), ctx()), /must use nLockTime 499999999/) // a client that skipped the protection
-  assert.deepEqual(replayPairs("btc"), ["xbt", "pecx", "ecx"], "Bitcoin replays onto Blake, eCash Beta and eCash")
-  assert.deepEqual(syncedChains("ecx"), ["ecx", "btc"])
-  // mainnet's replay nLockTime is 499,999,998: betanet's (499,999,999) isn't final there, nor mainnet's on betanet
+  // eCash: plain SIGHASH_ALL, replay-protected by nLockTime 499,999,998 (final there, never final on Bitcoin;
+  // LayerTwo Labs' catalog: its retired betanet's 499,999,999 isn't eCash's)
   assert.equal(CHAINS.ecx.replayLockTime, 499_999_998)
   const ecx = await signWith("ecx", psbtFor("ecx"), ctx())
-  assert.equal(Transaction.fromRaw(hexToBytes(ecx.hex), { allowUnknownOutputs: true }).lockTime, 499_999_998)
+  signed = Transaction.fromRaw(hexToBytes(ecx.hex), { allowUnknownOutputs: true })
+  assert.equal(signed.lockTime, 499_999_998)
+  assert.equal(signed.getInput(0).sequence, 0xfffffffd, "a non-final input makes the locktime bind")
+  assert.equal(signed.getInput(0).finalScriptWitness![0].at(-1), SigHash.ALL)
   validateBroadcast("ecx", ecx.hex)
-  await throws(() => validateBroadcast("pecx", ecx.hex), /must use nLockTime 499999999/)
-  await throws(() => validateBroadcast("ecx", pecx.hex), /must use nLockTime 499999998/)
   await throws(() => validateBroadcast("btc", ecx.hex), /eCash's replay protection/)
-  assert.deepEqual(syncedChains("pecx"), ["pecx", "btc"])
+  await throws(() => validateBroadcast("ecx", btc.hex), /must use nLockTime 499999998/)
+  await throws(() => signWith("ecx", psbtFor("btc"), ctx()), /must use nLockTime 499999998/) // a client that skipped the protection
+  // nLockTime is the last 4 bytes, little-endian: betanet's 499,999,999 (0x1dcd64ff) instead of 0x1dcd64fe
+  assert.ok(ecx.hex.endsWith("fe64cd1d"))
+  await throws(() => validateBroadcast("ecx", ecx.hex.slice(0, -8) + "ff64cd1d"), /must use nLockTime 499999998/)
+  assert.deepEqual(replayPairs("btc"), ["xbt", "ecx"], "Bitcoin replays onto Blake and eCash")
+  assert.deepEqual(syncedChains("ecx"), ["ecx", "btc"])
   assert.equal(minDataScript("btc"), 84)
-  assert.equal(minDataScript("pecx"), 0, "eCash has no OP_RETURN cap to pin a tx with")
+  assert.equal(minDataScript("ecx"), 0, "eCash has no OP_RETURN cap to pin a tx with")
 
   // external signer round trip: a finalized tx, or a PSBT with partial sigs, must match what we built
   const btcPsbt = psbtFor("btc")
@@ -300,17 +296,18 @@ const throws = async (fn: () => unknown, re: RegExp) => {
   await throws(() => signWith("btc", psbtFor("btc"), ctx({ prevOut: async () => ({ script: p2wpkh(pub0).script, amount: 99_999n }) })), /amount or script/)
   await throws(() => signWith("xbt", psbtFor("btc", new Uint8Array(5)), ctx()), /not allowed on Blake/)
 
-  // --- BIP300 deposit (M5) on eCash Beta -------------------------------------------------------
-  // a real betanet deposit to Thunder (slot 9): treasury in (empty scriptSig) → new treasury, address OP_RETURN, change
+  // --- BIP300 deposit (M5) on eCash ----------------------------------------------------------------
+  // a real deposit to Thunder (slot 9) on eCash's retired betanet, same OP_DRIVECHAIN: treasury in (empty scriptSig) →
+  // new treasury, address OP_RETURN, change
   const betanet = parseTxHex(
     "0100000000010253be73b8636651106b245168ec4ab28fa4e63f6d4c33ad16e6f7bf5b2f10d1dd0000000000fdffffff81fa3e519b8489b35fcf40cf34de3eb28c1fbbf1a65c93b47b8320d380c11c610200000000fdffffff03d54f5a901700000004b701095100000000000000001d6a1b58446b65756d7a427051366d61476561646d6e686f344a45345546f70fc6c30600000016001480fa39033e7ccc82032ff7f1464e0959bb6e2dda000247304402205fd24b64110e37ab64b28062201f7acda5f4b43ca25c5a0d92f3e22ba666f87402207786f8637007f66079dddeed8920004fb3a7b112219631cbd76f5f431d77baf2012102f27a079ec12359c0c148ae2b5dcdb2023bb94dc14badb3924eadf9ed5554c6c4ff64cd1d",
   )
-  const real = depositOf("pecx", betanet)!
+  const real = depositOf("ecx", betanet)!
   assert.deepEqual([real.slot, real.vout, real.value, new TextDecoder().decode(real.address)], [9, 0, 101_206_085_589n, "XDkeumzBpQ6maGeadmnho4JE4UF"])
   assert.equal(vsizeOf(betanet), 202, "weight 806: the treasury input adds 41 bytes and an empty witness")
-  assert.equal(estimateVsize(1, [drivechainScript("pecx", 9), depositDataScript("XDkeumzBpQ6maGeadmnho4JE4UF"), p2wpkh(pub0).script], 1), 202)
+  assert.equal(estimateVsize(1, [drivechainScript("ecx", 9), depositDataScript("XDkeumzBpQ6maGeadmnho4JE4UF"), p2wpkh(pub0).script], 1), 202)
   assert.equal(depositOf("btc", betanet), null, "OP_DRIVECHAIN only means something where drivechains run")
-  assert.deepEqual(drivechainScript("pecx", 9), Uint8Array.of(0xb7, 0x01, 0x09, 0x51), "betanet's OP_DRIVECHAIN is OP_NOP8")
+  assert.deepEqual(drivechainScript("ecx", 9), Uint8Array.of(0xb7, 0x01, 0x09, 0x51), "eCash's OP_DRIVECHAIN is OP_NOP8")
   // deposit address: s<slot>_<address>_<sha256(prefix)[..3]> (thunder-rust Address::format_for_deposit)
   const thunderAddress = "s9_XDkeumzBpQ6maGeadmnho4JE4UF_7ab137"
   assert.deepEqual(parseDepositAddress(` ${thunderAddress} `), { slot: 9, address: "XDkeumzBpQ6maGeadmnho4JE4UF" })
@@ -320,46 +317,46 @@ const throws = async (fn: () => unknown, re: RegExp) => {
 
   const treasuryTx = new Transaction({ allowUnknownInputs: true, allowUnknownOutputs: true })
   treasuryTx.addInput({ txid: "22".repeat(32), index: 0 })
-  treasuryTx.addOutput({ script: drivechainScript("pecx", 9), amount: 5_000_000n })
+  treasuryTx.addOutput({ script: drivechainScript("ecx", 9), amount: 5_000_000n })
   const ctip = { txid: treasuryTx.id, vout: 0, value: 5_000_000 }
   const depositPlan = (c: typeof ctip | null, address = thunderAddress) =>
-    planTx({ chain: "pecx", recipients: [{ address, amount: 30_000 }], candidates: [fundCoin], fee: feeAt(2), changeAddress: change0, deposit: { ctip: c } })
+    planTx({ chain: "ecx", recipients: [{ address, amount: 30_000 }], candidates: [fundCoin], fee: feeAt(2), changeAddress: change0, deposit: { ctip: c } })
   const dp = depositPlan(ctip)
   assert.deepEqual(dp.outputs.map((o) => [o.kind, o.amount]), [["recipient", 5_030_000], ["data", 0], ["change", 100_000 - 30_000 - dp.fee]], "M5 order")
   assert.equal(sentBy(dp), 30_000, "the carried-over treasury isn't sent")
   const depositPsbt = (plan: typeof dp) =>
-    buildPsbt(plan, { chain: "pecx", xpub, fingerprint: master.fingerprint, accountPath: "m/84'/0'/0'", tipHeight: 970_000, parents: { [ctip.txid]: treasuryTx.hex } }).toPSBT()
+    buildPsbt(plan, { chain: "ecx", xpub, fingerprint: master.fingerprint, accountPath: "m/84'/0'/0'", tipHeight: 970_000, parents: { [ctip.txid]: treasuryTx.hex } }).toPSBT()
   const psbt = Transaction.fromPSBT(depositPsbt(dp), { allowUnknownOutputs: true })
   assert.equal(bytesToHex(psbt.getInput(0).txid!), ctip.txid, "treasury spent first")
   assert.ok(!psbt.getInput(0).bip32Derivation && !psbt.getInput(0).witnessUtxo, "nobody signs the treasury")
   const sidechainAt = (c: typeof ctip | null) => async (slot: number) => (slot === 9 ? { ctip: c } : null)
   const depositCtx = (c: typeof ctip | null = ctip, overrides: Partial<SignContext> = {}) =>
     ctx({ prevOut: async (txid, vout) => (txid === ctip.txid ? treasuryTx : funding).getOutput(vout), sidechain: sidechainAt(c), ...overrides })
-  const dep = await signWith("pecx", depositPsbt(dp), depositCtx())
+  const dep = await signWith("ecx", depositPsbt(dp), depositCtx())
   const depTx = parseTxHex(dep.hex)
-  assert.equal(depTx.lockTime, 499_999_999, "deposits keep eCash's replay protection")
+  assert.equal(depTx.lockTime, 499_999_998, "deposits keep eCash's replay protection")
   assert.ok(!depTx.getInput(0).finalScriptSig?.length && !depTx.getInput(0).finalScriptWitness?.length, "treasury: empty scriptSig and witness")
   assert.equal(depTx.getInput(1).finalScriptWitness!.length, 2)
-  assert.deepEqual({ ...depositOf("pecx", depTx)!, address: new TextDecoder().decode(depositOf("pecx", depTx)!.address) }, { slot: 9, vout: 0, value: 5_030_000n, address: "XDkeumzBpQ6maGeadmnho4JE4UF" })
+  assert.deepEqual({ ...depositOf("ecx", depTx)!, address: new TextDecoder().decode(depositOf("ecx", depTx)!.address) }, { slot: 9, vout: 0, value: 5_030_000n, address: "XDkeumzBpQ6maGeadmnho4JE4UF" })
   assert.equal(dep.fee, dp.fee)
   assert.ok(dep.vsize <= dp.vsize && dp.vsize - dep.vsize <= 1, "vsize estimate counts the treasury input")
-  validateBroadcast("pecx", dep.hex)
-  assert.equal(importSigned("pecx", depositPsbt(dp), dep.hex).txid, dep.txid, "external signer round trip skips the treasury")
+  validateBroadcast("ecx", dep.hex)
+  assert.equal(importSigned("ecx", depositPsbt(dp), dep.hex).txid, dep.txid, "external signer round trip skips the treasury")
   // first deposit to a slot: no treasury to spend
   const first = depositPlan(null)
   assert.ok(first.outputs[0].amount === 30_000 && !first.deposit!.ctip)
-  assert.equal(parseTxHex((await signWith("pecx", depositPsbt(first), depositCtx(null))).hex).inputsLength, 1)
+  assert.equal(parseTxHex((await signWith("ecx", depositPsbt(first), depositCtx(null))).hex).inputsLength, 1)
   // refusals: an inactive slot (anyone-can-spend output), a stale or fake treasury, a broken M5 layout
-  await throws(() => signWith("pecx", depositPsbt(depositPlan(null, "s7_x_" + bytesToHex(sha256(utf8ToBytes("s7_x_")).slice(0, 3)))), depositCtx()), /slot 7 isn't active/)
-  await throws(() => signWith("pecx", depositPsbt(first), depositCtx()), /current treasury/)
-  await throws(() => signWith("pecx", depositPsbt(dp), depositCtx({ ...ctip, txid: "33".repeat(32) })), /not from this wallet/)
-  await throws(() => signWith("pecx", depositPsbt(dp), depositCtx({ ...ctip, value: 4_000_000 })), /treasury doesn't match/)
+  await throws(() => signWith("ecx", depositPsbt(depositPlan(null, "s7_x_" + bytesToHex(sha256(utf8ToBytes("s7_x_")).slice(0, 3)))), depositCtx()), /slot 7 isn't active/)
+  await throws(() => signWith("ecx", depositPsbt(first), depositCtx()), /current treasury/)
+  await throws(() => signWith("ecx", depositPsbt(dp), depositCtx({ ...ctip, txid: "33".repeat(32) })), /not from this wallet/)
+  await throws(() => signWith("ecx", depositPsbt(dp), depositCtx({ ...ctip, value: 4_000_000 })), /treasury doesn't match/)
   const swapped = Transaction.fromPSBT(depositPsbt(dp), { allowUnknownOutputs: true })
   const [o0, o1] = [swapped.getOutput(0), swapped.getOutput(1)]
   swapped.updateOutput(0, { script: o1.script, amount: o1.amount })
   swapped.updateOutput(1, { script: o0.script, amount: o0.amount })
-  await throws(() => signWith("pecx", swapped.toPSBT(), depositCtx()), /followed by an OP_RETURN/)
-  await throws(() => signWith("pecx", depositPsbt(dp), depositCtx(ctip, { sidechain: undefined })), /need a BIP300 enforcer/)
+  await throws(() => signWith("ecx", swapped.toPSBT(), depositCtx()), /followed by an OP_RETURN/)
+  await throws(() => signWith("ecx", depositPsbt(dp), depositCtx(ctip, { sidechain: undefined })), /need a BIP300 enforcer/)
 
   // --- Wallets: .env default, software (password), watch-only ---------------------------------
   process.env.SEED_PHRASE = mnemonic
@@ -415,7 +412,8 @@ const throws = async (fn: () => unknown, re: RegExp) => {
   assert.deepEqual(parseSettings({ hidden: ["xbt", "signet", "xbt"] }), { hidden: ["xbt", "signet"] })
   assert.throws(() => parseSettings({ hidden: ["doge"] }), /Invalid setting/)
   assert.throws(() => parseSettings({ hidden: "xbt" }), /Invalid setting/)
-  assert.deepEqual(parseSettings({ chain: "pecx" }), { chain: "pecx" })
+  assert.deepEqual(parseSettings({ chain: "ecx" }), { chain: "ecx" })
+  assert.throws(() => parseSettings({ chain: "pecx" }), /Invalid setting/, "eCash Beta is gone")
   assert.deepEqual(parseSettings({ modules: { example: true } }), { modules: { example: true } })
   assert.throws(() => parseSettings({ modules: { nope: true } }), /Invalid setting/)
   assert.throws(() => parseSettings({ modules: { example: "yes" } }), /Invalid setting/)

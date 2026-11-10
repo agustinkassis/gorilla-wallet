@@ -63,7 +63,7 @@ export default function DrivechainsPage() {
             <LayersIcon className="size-4" /> Drivechains
           </CardTitle>
           <CardDescription>
-            {meta.label} has no BIP300 sidechains. Switch the network (top right) to <b>eCash</b> or <b>eCash Beta</b> to move coins into
+            {meta.label} has no BIP300 sidechains. Switch the network (top right) to <b>eCash</b> to move coins into
             a drivechain and back.
           </CardDescription>
         </CardHeader>

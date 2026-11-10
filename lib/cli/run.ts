@@ -54,7 +54,7 @@ function required(args: Args, name: string) {
   if (value === undefined || value === "") throw new CliError(`--${name} is required`)
   return value
 }
-// ponytail: the CLI covers btc/xbt/regtest; eCash Beta (a replay pair of btc on the web) is left out until it's needed here
+// ponytail: the CLI covers btc/xbt/regtest; eCash (a replay pair of btc on the web) is left out until it's needed here
 const synced = (chain: Chain) => syncedChains(chain).filter((c) => c === "btc" || c === "xbt" || c === "regtest")
 function chainArg(args: Args, fallback?: "btc"): "btc" | "xbt" | "regtest" {
   const chain = args.value("chain") ?? fallback

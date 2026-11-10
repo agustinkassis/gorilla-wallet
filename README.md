@@ -1,7 +1,7 @@
 # 🦍 Gorilla Wallet
 
 A self-hosted, multi-wallet Bitcoin wallet with optional Nostr login, coin control, several networks (Bitcoin, the
-**Blake2b (XBT)** fork, the **eCash (pECX)** BIP300 betanet, Testnet4, Testnet3, Signet) and a desktop app for macOS, Windows and Linux.
+**Blake2b (XBT)** fork, **eCash (ECX)** with BIP300 drivechains, Testnet4, Testnet3, Signet) and a desktop app for macOS, Windows and Linux.
 
 Keys live only on your server. The browser gets each wallet's xpub (to derive addresses and build unsigned PSBTs)
 and asks the backend to sign. It runs with an **empty `.env`**: no login, and only reachable from this machine. Set
@@ -67,9 +67,9 @@ an earlier version asks for its password once to enable testnets.
 
 ## Networks
 
-Pick the network in the navbar (top right): **Bitcoin**, **Blake**, **eCash**, **eCash Beta**, **Testnet4**,
-**Testnet3** or **Signet**, one at a time. A fork's replay pairs sync along in the background (on Bitcoin, Blake, eCash
-and eCash Beta too; on a fork, Bitcoin), so replay checks and the replay guards always have both chains.
+Pick the network in the navbar (top right): **Bitcoin**, **Blake**, **eCash**, **Testnet4**, **Testnet3** or
+**Signet**, one at a time. A fork's replay pairs sync along in the background (on Bitcoin, Blake and eCash too; on a
+fork, Bitcoin), so replay checks and the replay guards always have both chains.
 
 Every chain is data in [`lib/chains.ts`](lib/chains.ts): address family, colors, default sources, and features such as
 SIGHASH_UNIFIED replay protection, consensus output limits and its replay pair. Adding a chain is adding an entry.
@@ -89,7 +89,7 @@ Each chain can use several Electrum servers and mempool.space-compatible explore
 - **Replay** (Bitcoin ↔ Blake, eCash): analyze rebroadcasting any transaction in your history on the other chain, including
   incoming ones that spend someone else's coins, with an inputs → tx → outputs graph and the reason it works or not,
   then broadcast it
-- **Networks**: Bitcoin, Blake, eCash Beta, Testnet4, Testnet3 and Signet from the navbar, with editable sources per chain
+- **Networks**: Bitcoin, Blake, eCash, Testnet4, Testnet3 and Signet from the navbar, with editable sources per chain
 - **Sats / BTC switch** in the navbar: every amount in the app in sats or in coins
 - **Coin control**: freeze / unfreeze, labels on coins, addresses and txs, BIP-329 export/import
 - **Receive**: next unused address with QR, gap-limit discovery (20 receive / 10 change), change on the internal chain
@@ -127,16 +127,14 @@ Select **Blake** or **Bitcoin** in the navbar: the same keys are tracked on both
 [eCash](https://github.com/eCash-com/fast-facts) is LayerTwo Labs' hard fork of Bitcoin (Bitcoin Core 31.1) that
 activates drivechains (BIP300/301). Keys and addresses are Bitcoin's: the same wallet holds both.
 
-- **eCash Beta (pECX)**: the betanet, forked at block 967,680, practice coins. Electrum
-  `ssl://explorer.beta.ecash.ninja:50002`, explorer/API `https://explorer.beta.ecash.ninja` (its Esplora API isn't
-  mempool.space-shaped, so it isn't a source), P2P `seed.beta.ecash.ninja:8533`, magic `0xeca5b104`.
 - **eCash (ECX)**: mainnet, live since 2026-10-29, forked at block 973,728. Electrum `ssl://explorer.ecash.ninja:50002`
-  (`tcp://…:50001` fallback), explorer/API `https://explorer.ecash.ninja` (mempool.space-compatible).
-- eCash sends use a replay **nLockTime** with RBF inputs: **499,999,998** on eCash, **499,999,999**
-  (`LOCKTIME_THRESHOLD - 1`) on eCash Beta (LayerTwo Labs' network catalog). Each network treats its own as final;
-  Bitcoin, Blake and the other eCash network read it as a block ~500M blocks away, so it never confirms there. The signer
-  and broadcast refuse an eCash transaction without its network's value.
-- Nothing marks a Bitcoin transaction as invalid on eCash. **Not replayable on eCash Beta** (Bitcoin sends) instead
+  (`tcp://…:50001` fallback), explorer/API `https://explorer.ecash.ninja` (mempool.space-compatible). Its betanet
+  (eCash Beta, pECX) stopped at block 974,075 on 2026-10-31 and lost its servers, so it was removed: a migration drops
+  its synced data and moves a wallet that had it selected to eCash.
+- eCash sends use replay **nLockTime 499,999,998** (LayerTwo Labs' network catalog) with RBF inputs: eCash treats it
+  as final, Bitcoin and Blake as a block ~500M blocks away, so it never confirms there. The signer and broadcast refuse
+  an eCash transaction without it.
+- Nothing marks a Bitcoin transaction as invalid on eCash. **Not replayable on eCash** (Bitcoin sends) instead
   spends at least one coin eCash lacks (received after the fork, or already split there), so eCash rejects the whole
   transaction. On eCash, **Split coins** sends your coins still shared with Bitcoin to yourself, protected: afterwards
   Bitcoin spends of them can't be replayed onto eCash.
@@ -144,10 +142,9 @@ activates drivechains (BIP300/301). Keys and addresses are Bitcoin's: the same w
   (`s9_<address>_<checksum>` from Thunder, BitNames, BitAssets, Photon…). The transaction spends the sidechain's
   treasury (CTIP, unsigned) with your coins into a new treasury holding both, followed by an OP_RETURN with the sidechain
   address. Active slots and treasuries come from a bip300301_enforcer (`ECX_ENFORCER`, default
-  `https://seed.ecash.eu.com/enforcer`; `PECX_ENFORCER`, default `https://enforcer.beta.ecash.ninja`); the signer
-  refuses inactive slots (their output would be anyone-can-spend) and stale treasuries. Every eCash network's
-  OP_DRIVECHAIN is OP_NOP8 (`0xb7`), not BIP300's OP_NOP5.
-- **Drivechains** (sidebar, on eCash and eCash Beta): the active sidechains with their treasuries, slot proposals and
+  `https://seed.ecash.eu.com/enforcer`); the signer refuses inactive slots (their output would be anyone-can-spend) and
+  stale treasuries. eCash's OP_DRIVECHAIN is OP_NOP8 (`0xb7`), not BIP300's OP_NOP5.
+- **Drivechains** (sidebar, on eCash): the active sidechains with their treasuries, slot proposals and
   their votes, and guided flows. **Peg in** checks the sidechain's deposit address (slot and checksum) and opens Send
   with it, and lists your past deposits there. **Peg out** starts in the sidechain's wallet: copy a fresh, labeled
   address here, withdraw to it there, then follow the sidechain's withdrawal bundles (collecting acks, paid, failed) until
@@ -162,8 +159,8 @@ Copy `.env.example` to `.env` only to change a default.
 | `SEED_PHRASE` | Optional default wallet (BIP39). Never sent to the browser or stored |
 | `DERIVATION_PATH` | Its account path, default `m/84'/0'/0'` (P2WPKH) |
 | `ALLOWED_PUBKEYS` | Optional npub/hex allowlist. Set: every API call needs a NIP-98 login from one of these keys. Unset: no login, localhost only |
-| `<CHAIN>_ELECTRUM` | Comma-separated `tcp://` / `ssl://` Electrum servers, tried in order (`BTC_ELECTRUM`, `XBT_ELECTRUM`, `PECX_ELECTRUM`, `TBTC4_ELECTRUM`, …). Settings → Networks overrides it |
-| `<CHAIN>_ENFORCER` | BIP300 enforcers (Connect/HTTP) for sidechains, comma-separated (`ECX_ENFORCER`, `PECX_ENFORCER`) |
+| `<CHAIN>_ELECTRUM` | Comma-separated `tcp://` / `ssl://` Electrum servers, tried in order (`BTC_ELECTRUM`, `XBT_ELECTRUM`, `ECX_ELECTRUM`, `TBTC4_ELECTRUM`, …). Settings → Networks overrides it |
+| `<CHAIN>_ENFORCER` | BIP300 enforcers (Connect/HTTP) for sidechains, comma-separated (`ECX_ENFORCER`) |
 | `ELECTRUM_SELF_SIGNED` | Comma-separated Electrum hosts whose `ssl://` certificate isn't verified (a self-signed node you trust). Every other `ssl://` server needs a valid certificate |
 | `MEMPOOL_<CHAIN>_URL` | mempool.space-compatible APIs: fees, broadcast, explorer links (`MEMPOOL_BTC_URL`, …) |
 | `DATABASE_URL` | SQLite file (default `file:./data/wallet.db`) |
