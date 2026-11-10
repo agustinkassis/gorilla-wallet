@@ -8,7 +8,7 @@ import { base64 } from "@scure/base"
 import { sha256 } from "@noble/hashes/sha2.js"
 import { bytesToHex, hexToBytes, utf8ToBytes } from "@noble/hashes/utils.js"
 import { SIGHASH_ALL_UNIFIED, SIGHASH_UNIFIED, unifiedSighash } from "@/lib/unified-sighash"
-import { CHAINS, REPLAY_LOCKTIME, dataCapPair, familyOf, minDataScript, networkOf, type Chain } from "@/lib/chains"
+import { CHAINS, REPLAY_LOCKTIMES, dataCapPair, familyOf, minDataScript, networkOf, type Chain } from "@/lib/chains"
 
 export type Coin = { txid: string; vout: number; value: number; address: string; change: 0 | 1; index: number; height: number }
 /** An address, or a raw output script (module transactions). */
@@ -309,13 +309,17 @@ function shuffle<T>(list: T[]) {
   return a
 }
 
-/** eCash replay protection: nLockTime REPLAY_LOCKTIME, binding (some nSequence isn't final), so Bitcoin never accepts it. */
-export const hasReplayLockTime = (tx: Transaction) =>
-  tx.lockTime === REPLAY_LOCKTIME && Array.from({ length: tx.inputsLength }, (_, i) => tx.getInput(i).sequence ?? 0xffffffff).some((s) => s !== 0xffffffff)
+/**
+ * eCash replay protection: nLockTime `lock` (any eCash network's when omitted), binding (some nSequence isn't final),
+ * so Bitcoin never accepts it.
+ */
+export const hasReplayLockTime = (tx: Transaction, lock?: number) =>
+  (lock === undefined ? REPLAY_LOCKTIMES.includes(tx.lockTime) : tx.lockTime === lock) &&
+  Array.from({ length: tx.inputsLength }, (_, i) => tx.getInput(i).sequence ?? 0xffffffff).some((s) => s !== 0xffffffff)
 
 /**
  * Unsigned PSBT for a plan. Inputs declare SIGHASH_ALL, or ALL|UNIFIED (0x21) on SIGHASH_UNIFIED chains (Blake).
- * nLockTime = tip (anti-fee-sniping), or REPLAY_LOCKTIME on eCash; nSequence signals RBF, output order is randomized.
+ * nLockTime = tip (anti-fee-sniping), or the chain's replayLockTime on eCash; nSequence signals RBF, output order is randomized.
  * A deposit spends the sidechain's treasury first (its parent from `parents`, empty scriptSig: nobody signs it) and
  * keeps the M5 order: new treasury, address OP_RETURN, change.
  */
@@ -325,7 +329,7 @@ export function buildPsbt(
 ) {
   const account = HDKey.fromExtendedKey(ctx.xpub)
   const sighashType = CHAINS[ctx.chain].unifiedSighash ? SIGHASH_ALL_UNIFIED : SigHash.ALL
-  const tx = new Transaction({ version: 2, lockTime: CHAINS[ctx.chain].replayLockTime ? REPLAY_LOCKTIME : ctx.tipHeight, allowUnknownOutputs: true, allowUnknownInputs: true })
+  const tx = new Transaction({ version: 2, lockTime: CHAINS[ctx.chain].replayLockTime ?? ctx.tipHeight, allowUnknownOutputs: true, allowUnknownInputs: true })
   const ctip = plan.deposit?.ctip
   if (ctip) {
     const parent = ctx.parents?.[ctip.txid]

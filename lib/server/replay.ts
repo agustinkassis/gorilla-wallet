@@ -1,7 +1,7 @@
 import "server-only"
 import { bytesToHex } from "@noble/hashes/utils.js"
 import { sha256 } from "@noble/hashes/sha2.js"
-import { CHAINS, REPLAY_LOCKTIME, replayPairs, type Chain } from "@/lib/chains"
+import { CHAINS, REPLAY_LOCKTIMES, replayPairs, type Chain } from "@/lib/chains"
 import { db } from "@/lib/server/db"
 import { chainFor, type ChainClient } from "@/lib/server/watcher"
 import { addressFor, isDataScript, parseTxHex, vsizeOf } from "@/lib/tx"
@@ -72,7 +72,7 @@ async function outpointOnTarget(dst: ChainClient, txid: string, vout: number, sc
  * Can `txid` (confirmed or pending on `from`) be rebroadcast as-is on a replay pair (Bitcoin ↔ Blake, eCash)?
  * Same bytes, same signatures: it is valid there only if every input's coin exists unspent there, the signatures
  * don't use SIGHASH_UNIFIED when the target lacks it, every output satisfies the target's consensus rules, and the
- * locktime is final there (eCash's REPLAY_LOCKTIME only on eCash). Anyone's transaction can be replayed: its coins
+ * locktime is final there (an eCash network's replay nLockTime only on that network). Anyone's transaction can be replayed: its coins
  * move on the target exactly as the signer sent them on the source (an incoming payment replayed pays you the forked
  * coins too).
  */
@@ -149,8 +149,8 @@ export async function analyzeReplay(walletId: string, from: Chain, txid: string,
   // nLockTime only binds when some input's nSequence isn't final
   const lockTime = tx.lockTime
   const lockActive = lockTime > 0 && inputs.length > 0 && Array.from({ length: tx.inputsLength }, (_, i) => tx.getInput(i).sequence ?? 0xffffffff).some((s) => s !== 0xffffffff)
-  const replayLock = lockActive && lockTime === REPLAY_LOCKTIME
-  const lockFinal = !lockActive || (replayLock ? !!CHAINS[to].replayLockTime : lockTime < LOCKTIME_THRESHOLD ? lockTime <= targetHeight : lockTime <= Date.now() / 1000)
+  const replayLock = lockActive && REPLAY_LOCKTIMES.includes(lockTime)
+  const lockFinal = !lockActive || (replayLock ? CHAINS[to].replayLockTime === lockTime : lockTime < LOCKTIME_THRESHOLD ? lockTime <= targetHeight : lockTime <= Date.now() / 1000)
 
   const all = (s: { status: Status }[]) => (s.every((x) => x.status === "pass") ? "pass" : "fail")
   const sigProtected = !CHAINS[to].unifiedSighash && inputs.some((i) => i.sighash !== null && i.sighash & SIGHASH_UNIFIED)
@@ -206,8 +206,8 @@ export async function analyzeReplay(walletId: string, from: Chain, txid: string,
         ? "No locktime."
         : replayLock
           ? lockFinal
-            ? `nLockTime ${REPLAY_LOCKTIME.toLocaleString()} is final on ${T}.`
-            : `nLockTime ${REPLAY_LOCKTIME.toLocaleString()} is eCash's replay protection: ${T} reads it as a block ~500M blocks away and never accepts it.`
+            ? `nLockTime ${lockTime.toLocaleString()} is final on ${T}.`
+            : `nLockTime ${lockTime.toLocaleString()} is eCash's replay protection: ${T} reads it as a block ~500M blocks away and never accepts it.`
           : lockFinal
           ? `nLockTime ${lockTime.toLocaleString()} is already final on ${T} (tip ${targetHeight.toLocaleString()}).`
           : `nLockTime ${lockTime.toLocaleString()} is in the future on ${T} (tip ${targetHeight.toLocaleString()}): it can't confirm yet.`,

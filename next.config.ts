@@ -46,6 +46,9 @@ const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
   turbopack: {
+    // pin to this checkout: in a worktree (.claude/worktrees/*) Next otherwise picks the parent repo's workspace as
+    // root, watches this .next/ as source, and the dev log it writes on each request triggers an endless reload
+    root: import.meta.dirname,
     rules: {
       "*.css": {
         loaders: ["@tailwindcss/turbopack"],
