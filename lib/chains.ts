@@ -33,7 +33,7 @@ export type ChainDef = {
   replayPair?: Chain
   /**
    * eCash's opt-in replay protection: sends use this nLockTime, final here but a height ~500M blocks away (never final)
-   * on Bitcoin and on the other eCash network. Betanet 499,999,999 (LOCKTIME_THRESHOLD - 1), mainnet 499,999,998.
+   * on Bitcoin. Mainnet 499,999,998 (its betanet, retired, used 499,999,999).
    */
   replayLockTime?: number
   /** the block it forks from its replay pair at */
@@ -47,7 +47,7 @@ export type ChainDef = {
   drivechain?: { opcode: number; enforcer: string[] }
 }
 
-export type Chain = "btc" | "xbt" | "ecx" | "pecx" | "tbtc4" | "tbtc3" | "signet" | "regtest"
+export type Chain = "btc" | "xbt" | "ecx" | "tbtc4" | "tbtc3" | "signet" | "regtest"
 
 export const CHAINS: Record<Chain, ChainDef> = {
   regtest: {
@@ -110,21 +110,6 @@ export const CHAINS: Record<Chain, ChainDef> = {
     electrum: ["ssl://mempool.space:60602"],
     mempool: ["https://mempool.space/signet"],
   },
-  pecx: {
-    label: "eCash Beta",
-    unit: "pECX",
-    text: "text-sky-600 dark:text-sky-400",
-    bg: "bg-sky-500",
-    family: "main",
-    electrum: ["ssl://explorer.beta.ecash.ninja:50002"],
-    mempool: ["https://explorer.beta.ecash.ninja"],
-    // LayerTwo Labs' betanet: Bitcoin Core 31.1 + BIP300/301 drivechains (magic 0xeca5b104, P2P seed.beta.ecash.ninja:8533)
-    replayPair: "btc",
-    replayLockTime: 499_999_999,
-    forkHeight: 967_680,
-    // betanet moved OP_DRIVECHAIN from BIP300's OP_NOP5 (0xb4) to OP_NOP8 (bip300301_enforcer NetworkParams::betanet)
-    drivechain: { opcode: 0xb7, enforcer: ["https://enforcer.beta.ecash.ninja"] },
-  },
   ecx: {
     label: "eCash",
     unit: "ECX",
@@ -135,10 +120,10 @@ export const CHAINS: Record<Chain, ChainDef> = {
     electrum: ["ssl://explorer.ecash.ninja:50002", "tcp://explorer.ecash.ninja:50001"],
     mempool: ["https://explorer.ecash.ninja"],
     replayPair: "btc",
-    // LayerTwo Labs' network catalog and bip300301_enforcer NetworkParams: mainnet's differs from betanet's
+    // LayerTwo Labs' network catalog and bip300301_enforcer NetworkParams
     replayLockTime: 499_999_998,
     forkHeight: 973_728,
-    // OP_NOP8 like betanet (bip300301_enforcer NetworkParams: every eCash network); LayerTwo Labs' catalog enforcer
+    // OP_NOP8, not BIP300's OP_NOP5 (bip300301_enforcer NetworkParams); LayerTwo Labs' catalog enforcer
     drivechain: { opcode: 0xb7, enforcer: ["https://seed.ecash.eu.com/enforcer"] },
   },
 }
@@ -151,7 +136,7 @@ export const isChain = (c: unknown): c is Chain => typeof c === "string" && Obje
 export const familyOf = (chain: Chain) => CHAINS[chain].family
 export const networkOf = (family: Family) => FAMILIES[family].network
 
-/** Chains `chain`'s coins replay with: a fork's parent, or a parent's launched forks (Bitcoin: Blake, eCash Beta). */
+/** Chains `chain`'s coins replay with: a fork's parent, or a parent's launched forks (Bitcoin: Blake, eCash). */
 export const replayPairs = (chain: Chain): Chain[] => {
   const parent = CHAINS[chain].replayPair
   return parent ? [parent] : CHAIN_IDS.filter((c) => CHAINS[c].replayPair === chain && !CHAINS[c].soon)
