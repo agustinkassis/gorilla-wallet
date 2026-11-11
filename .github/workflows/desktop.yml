@@ -102,29 +102,29 @@ jobs:
             echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/AuthKey.p8"
           } >> "$GITHUB_ENV"
 
-      # GitHub's macOS runners scan the image hdiutil writes with XProtect, which can stall it until "Resource busy"
-      # (the Intel runner's DMG step timed out twice on v0.3.0; actions/runner-images#7522). Stop it first.
-      - name: Stop XProtect
+      # GitHub's macOS runners keep the image bundle_dmg.sh mounts busy (XProtect, Spotlight), so its unmount times out
+      # (the Intel runner failed v0.3.0 five times; actions/runner-images#7522). Stop both first.
+      - name: Quiet the disk scanners
         if: runner.os == 'macOS'
         run: |
+          sudo mdutil -a -i off || true
           sudo pkill -9 XProtect || true
-          for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -q XProtect || break; sleep 3; done
 
-      # --verbose shows the DMG script's own output. On macOS the .app is built, signed and notarized before the DMG,
-      # so a failed run retries packaging alone (`tauri bundle`), which doesn't recompile.
+      # On macOS the .app is built, signed and notarized before the DMG. If Tauri's DMG step still fails, package that
+      # .app with hdiutil -srcfolder instead, which never mounts a writable image (plain window, same contents).
       - name: Build
         shell: bash
         run: |
           pnpm tauri build --verbose && exit 0
           [ "$RUNNER_OS" = macOS ] || exit 1
-          for attempt in 1 2; do
-            echo "::warning::macOS bundling failed: retry $attempt"
-            sudo pkill -9 XProtect || true
-            for v in "/Volumes/Gorilla Wallet"*; do [ -d "$v" ] && hdiutil detach "$v" -force || true; done
-            rm -f src-tauri/target/release/bundle/dmg/*.dmg src-tauri/target/release/bundle/macos/rw.*.dmg
-            pnpm tauri bundle --bundles dmg --verbose && exit 0
-          done
-          exit 1
+          echo "::warning::Tauri's DMG step failed: packaging the notarized .app with hdiutil"
+          b=src-tauri/target/release/bundle
+          v=$(node -p 'require("./package.json").version')
+          a=$(uname -m | sed 's/x86_64/x64/; s/arm64/aarch64/')
+          for d in /Volumes/dmg.*; do [ -d "$d" ] && hdiutil detach "$d" -force || true; done
+          rm -rf "$b/dmg" "$b"/macos/rw.*.dmg stage && mkdir -p "$b/dmg" stage
+          ditto "$b/macos/Gorilla Wallet.app" "stage/Gorilla Wallet.app" && ln -s /Applications stage/Applications
+          hdiutil create -volname "Gorilla Wallet" -srcfolder stage -fs HFS+ -format UDZO "$b/dmg/Gorilla Wallet_${v}_${a}.dmg"
 
       - name: Check Gatekeeper accepts the app
         if: runner.os == 'macOS' && env.APPLE_API_KEY != ''
