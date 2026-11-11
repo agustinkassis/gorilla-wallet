@@ -8,8 +8,11 @@ on:
   workflow_dispatch:
   push:
     tags: ["v*"]
+    # main only compiles (no installers): it's the one ref whose caches tag and PR runs can read
+    branches: [main]
+    paths: ["src-tauri/**", "scripts/desktop.mjs", "next.config.ts", "pnpm-workspace.yaml", "pnpm-lock.yaml", ".github/workflows/desktop.yml"]
   pull_request:
-    paths: ["src-tauri/**", "scripts/desktop.mjs", "next.config.ts", "pnpm-workspace.yaml", ".github/workflows/desktop.yml"]
+    paths: ["src-tauri/**", "scripts/desktop.mjs", "next.config.ts", "pnpm-workspace.yaml", "pnpm-lock.yaml", ".github/workflows/desktop.yml"]
 
 permissions:
   contents: read
@@ -55,13 +58,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          # tags can't read caches saved by PRs, and PR caches would evict main's (10 GB per repo)
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - run: pnpm install --frozen-lockfile
 
       # macOS: Developer ID signing + notarization (README → Signed macOS builds). Missing secrets only warn outside tags.
       # The certificate goes into a temporary keychain first: scripts/desktop.mjs signs native modules before Tauri runs.
       - name: Apple Developer ID
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && github.ref != 'refs/heads/main'
         env:
           CERT: ${{ secrets.APPLE_CERTIFICATE }}
           CERT_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -115,6 +120,14 @@ jobs:
       - name: Build
         shell: bash
         run: |
+          [ "$GITHUB_REF" = refs/heads/main ] && exec pnpm tauri build --no-bundle
+          if [ "$RUNNER_OS" = Linux ]; then
+            # Tauri's RPM step is single-threaded and slow (~5 min, even with zstd): package it next to deb + AppImage
+            pnpm tauri build --no-bundle
+            pnpm tauri bundle --bundles rpm & rpm=$!
+            pnpm tauri bundle --bundles deb,appimage --verbose
+            wait $rpm; exit
+          fi
           pnpm tauri build --verbose && exit 0
           [ "$RUNNER_OS" = macOS ] || exit 1
           echo "::warning::Tauri's DMG step failed: packaging the notarized .app with hdiutil"
@@ -139,6 +152,7 @@ jobs:
           security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2> /dev/null || true
 
       - uses: actions/upload-artifact@v6
+        if: github.ref != 'refs/heads/main'
         with:
           name: gorilla-wallet-${{ matrix.name }}
           if-no-files-found: error

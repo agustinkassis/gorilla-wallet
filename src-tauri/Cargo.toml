@@ -12,4 +12,4 @@ open = "5"
 
 [profile.release]
 strip = true
-lto = true
+# no `lto = true`: fat LTO took ~2 extra minutes per build to save 1.4 MB, next to the ~110 MB bundled Node

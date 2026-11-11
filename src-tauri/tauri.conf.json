@@ -15,6 +15,7 @@
     "active": true,
     "targets": ["app", "dmg", "nsis", "deb", "rpm", "appimage"],
     "category": "Finance",
+    "linux": { "rpm": { "compression": { "type": "zstd", "level": 19 } } },
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
     "resources": { "server/": "server/" },
     "externalBin": ["binaries/gorilla-node"],
