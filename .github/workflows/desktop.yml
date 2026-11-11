@@ -102,7 +102,29 @@ jobs:
             echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/AuthKey.p8"
           } >> "$GITHUB_ENV"
 
-      - run: pnpm tauri build
+      # GitHub's macOS runners keep the image bundle_dmg.sh mounts busy (XProtect, Spotlight), so its unmount times out
+      # (the Intel runner failed v0.3.0 five times; actions/runner-images#7522). Stop both first.
+      - name: Quiet the disk scanners
+        if: runner.os == 'macOS'
+        run: |
+          sudo mdutil -a -i off || true
+          sudo pkill -9 XProtect || true
+
+      # On macOS the .app is built, signed and notarized before the DMG. If Tauri's DMG step still fails, package that
+      # .app with hdiutil -srcfolder instead, which never mounts a writable image (plain window, same contents).
+      - name: Build
+        shell: bash
+        run: |
+          pnpm tauri build --verbose && exit 0
+          [ "$RUNNER_OS" = macOS ] || exit 1
+          echo "::warning::Tauri's DMG step failed: packaging the notarized .app with hdiutil"
+          b=src-tauri/target/release/bundle
+          v=$(node -p 'require("./package.json").version')
+          a=$(uname -m | sed 's/x86_64/x64/; s/arm64/aarch64/')
+          for d in /Volumes/dmg.*; do [ -d "$d" ] && hdiutil detach "$d" -force || true; done
+          rm -rf "$b/dmg" "$b"/macos/rw.*.dmg stage && mkdir -p "$b/dmg" stage
+          ditto "$b/macos/Gorilla Wallet.app" "stage/Gorilla Wallet.app" && ln -s /Applications stage/Applications
+          hdiutil create -volname "Gorilla Wallet" -srcfolder stage -fs HFS+ -format UDZO "$b/dmg/Gorilla Wallet_${v}_${a}.dmg"
 
       - name: Check Gatekeeper accepts the app
         if: runner.os == 'macOS' && env.APPLE_API_KEY != ''
