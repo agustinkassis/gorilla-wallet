@@ -8,6 +8,7 @@ import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js"
 import { PuzzleIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { shorten } from "@/components/site-header"
 import { TxDialog, autoCandidates, coinsOf, useTxFlow } from "@/components/tx-dialog"
@@ -136,7 +137,7 @@ export function ModuleFrame({ module, view, minHeight = 120, className }: { modu
 /** A module's transaction, checked like any input: valid outputs, sane fee, the user's review. */
 function parseRequest(raw: unknown) {
   const r = (raw ?? {}) as SendRequest
-  if (!Array.isArray(r.outputs) || r.outputs.length > 100) throw new PlanError("outputs must be a list of up to 100")
+  if (!Array.isArray(r.outputs) || r.outputs.length > 500) throw new PlanError("outputs must be a list of up to 500")
   const recipients: Recipient[] = r.outputs.map((o) => {
     if (!o || typeof o !== "object" || !Number.isSafeInteger(o.amount) || o.amount <= 0) throw new PlanError("Every output needs a whole, positive amount in sats")
     if ("script" in o) {
@@ -152,6 +153,14 @@ function parseRequest(raw: unknown) {
   return { recipients, data: r.data === undefined ? undefined : hexToBytes(r.data), feeRate: r.feeRate, memo: typeof r.memo === "string" ? r.memo.slice(0, 200) : undefined }
 }
 
+/** fee choices in a module's review: the chain's live estimates, or a rate of the user's own */
+const SPEEDS = [
+  { id: "fast", label: "Fast", key: "fastestFee" },
+  { id: "medium", label: "Medium", key: "halfHourFee" },
+  { id: "slow", label: "Slow", key: "economyFee" },
+] as const
+type Speed = (typeof SPEEDS)[number]["id"] | "custom"
+
 function SendRequestDialog({ module, pending, onDone }: { module: ModuleManifest; pending: Pending; onDone: () => void }) {
   const wallet = useWallet()
   const unit = useUnit()
@@ -159,6 +168,14 @@ function SendRequestDialog({ module, pending, onDone }: { module: ModuleManifest
   const snap = wallet.snapshots[chain]
   const flow = useTxFlow(chain, (txid) => pending.resolve({ txid }))
   const sent = flow.step.name === "sent"
+  const fees = snap?.fees
+  const asked = (pending.request as SendRequest | null)?.feeRate
+  // start on the module's rate: its matching estimate, else as a custom rate; without one, the user's preset
+  const [speed, setSpeed] = useState<Speed>(() =>
+    typeof asked === "number" ? (SPEEDS.find((s) => fees?.[s.key] === asked)?.id ?? "custom") : (SPEEDS.find((s) => s.key === wallet.settings.feePreset)?.id ?? "medium"),
+  )
+  const [custom, setCustom] = useState(() => (typeof asked === "number" ? String(asked) : ""))
+  const rate = speed === "custom" ? Number(custom) : fees?.[SPEEDS.find((s) => s.id === speed)!.key]
 
   let plan: TxPlan | null = null
   let error: string | null = null
@@ -166,11 +183,10 @@ function SendRequestDialog({ module, pending, onDone }: { module: ModuleManifest
   try {
     const req = parseRequest(pending.request)
     memo = req.memo
-    const rate = req.feeRate ?? snap?.fees?.[wallet.settings.feePreset]
-    if (!rate) throw new PlanError("No fee estimate yet")
+    if (speed === "custom" ? !(rate! >= 1 && rate! <= 1000) : !rate) throw new PlanError(speed === "custom" ? "Enter a fee rate of 1–1000 sat/vB" : "No fee estimate yet")
     const changeAddress = nextUnused(wallet.snapshots, 1)?.address
     if (!changeAddress) throw new PlanError("The wallet hasn't synced yet")
-    plan = planTx({ chain, recipients: req.recipients, candidates: autoCandidates(coinsOf(snap), rate), fee: feeAt(rate), changeAddress, data: req.data })
+    plan = planTx({ chain, recipients: req.recipients, candidates: autoCandidates(coinsOf(snap), rate!), fee: feeAt(rate!), changeAddress, data: req.data })
   } catch (e) {
     error = (e as Error).message
   }
@@ -190,8 +206,28 @@ function SendRequestDialog({ module, pending, onDone }: { module: ModuleManifest
             </DialogTitle>
             <DialogDescription>{memo ?? `Review what it sends on ${CHAINS[chain].label}. Nothing is signed until you approve it in the next steps.`}</DialogDescription>
           </DialogHeader>
+          <div className="flex flex-col gap-2">
+            <div className="grid grid-cols-4 gap-1.5">
+              {[...SPEEDS, { id: "custom" as const, label: "Custom", key: null }].map((s) => (
+                <button
+                  key={s.id}
+                  disabled={flow.busy}
+                  onClick={() => setSpeed(s.id)}
+                  className={cn("flex flex-col items-center rounded-lg border px-2 py-1.5 text-xs transition-colors", speed === s.id ? "border-primary bg-secondary font-medium" : "hover:bg-muted/50")}
+                >
+                  {s.label}
+                  <span className="font-mono text-[11px] font-normal text-muted-foreground">
+                    {s.key ? (fees ? `${fees[s.key]} sat/vB` : "—") : speed === "custom" && custom ? `${custom} sat/vB` : "sat/vB"}
+                  </span>
+                </button>
+              ))}
+            </div>
+            {speed === "custom" && (
+              <Input autoFocus inputMode="decimal" placeholder="sat/vB" value={custom} onChange={(e) => setCustom(e.target.value)} className="font-mono text-xs" aria-label="Custom fee rate in sat/vB" />
+            )}
+          </div>
           {plan ? (
-            <ul className="flex flex-col gap-1.5 text-sm">
+            <ul className="flex max-h-[60vh] flex-col gap-1.5 overflow-y-auto text-sm">
               {plan.outputs.map((o, i) => (
                 <li key={i} className="flex justify-between gap-3">
                   <span className="min-w-0 truncate font-mono text-xs">

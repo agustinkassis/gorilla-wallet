@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@bitfiles/bpub':
+        specifier: 0.3.0
+        version: 0.3.0
       '@ngraveio/bc-ur':
         specifier: ^1.1.13
         version: 1.1.13
@@ -264,6 +267,10 @@ packages:
   '@babel/types@7.29.8':
     resolution: {integrity: sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg==}
     engines: {node: '>=6.9.0'}
+
+  '@bitfiles/bpub@0.3.0':
+    resolution: {integrity: sha512-W4h5guGsuhqE2f6W32aMhGOHtSAkwjlZKihFzGn1X+21XDJAy1ZQwzmKVrqY6fzDJbqmGCLiQfyfpwzbEM0hrg==}
+    engines: {node: '>=22.6'}
 
   '@dotenvx/dotenvx@1.75.1':
     resolution: {integrity: sha512-/BITOC9dmS/edY2zQwZNicQ059O6RKabtQfyEafV0nGtfYRNHYy1DIPiYVcov40+tob9hfmBnbR963dS+EQ1DQ==}
@@ -4912,6 +4919,13 @@ snapshots:
     dependencies:
       '@babel/helper-string-parser': 7.29.7
       '@babel/helper-validator-identifier': 7.29.7
+
+  '@bitfiles/bpub@0.3.0':
+    dependencies:
+      '@noble/curves': 2.4.0
+      '@noble/hashes': 2.4.0
+      '@scure/base': 2.4.0
+      '@scure/btc-signer': 2.4.1
 
   '@dotenvx/dotenvx@1.75.1':
     dependencies:

@@ -19,6 +19,7 @@
     "social": "node scripts/social.mjs"
   },
   "dependencies": {
+    "@bitfiles/bpub": "0.3.0",
     "@ngraveio/bc-ur": "^1.1.13",
     "@noble/curves": "^2.4.0",
     "@noble/hashes": "^2.4.0",

@@ -2,10 +2,11 @@
 // its manifest(s) here and its UI in ./ui.ts. See docs/MODULES.md.
 import type { Chain } from "@/lib/chains"
 import type { ModuleManifest, Slot } from "@/lib/modules/types"
+import { bitfiles } from "./bitfiles/manifest"
 import { example } from "./example/manifest"
 import { faucets } from "./faucet/manifest"
 
-export const MODULES: ModuleManifest[] = [...faucets, example]
+export const MODULES: ModuleManifest[] = [...faucets, bitfiles, example]
 
 export const moduleById = (id: string) => MODULES.find((m) => m.id === id)
 
