@@ -46,6 +46,8 @@ import { MODULE_ID, type ModuleManifest } from "../lib/modules/types"
 import { MODULES } from "../modules"
 import { UIS } from "../modules/ui"
 import type { FaucetConfig } from "../modules/faucet/manifest"
+import * as bpub from "../modules/bitfiles/inscribe"
+import { buildInscription } from "@bitfiles/bpub"
 
 const throws = async (fn: () => unknown, re: RegExp) => {
   try {
@@ -431,6 +433,27 @@ const throws = async (fn: () => unknown, re: RegExp) => {
       assert.match(f.url, /^https:\/\//, `${m.id}: ${f.name}`)
       if (f.api) for (const u of [f.api.claim, f.api.info]) assert.ok(m.hosts?.includes(new URL(u).hostname), `${m.id}: ${u} must be in hosts`)
     }
+  // bitfiles: a bpub upload round-trips (encode → shuffled funding outputs → reveal → decodes to the file)
+  {
+    const file = utf8ToBytes("gorilla ".repeat(2000) + "end")
+    const ownerAddress = p2wpkh(secp256k1.getPublicKey(secp256k1.utils.randomSecretKey(), true)).address!
+    const d = await bpub.draft(file, { mime: "text/plain", filename: "g.txt", key: bpub.newKey(), ownerAddress })
+    assert.ok(d.compressed && d.scripts.length > 0)
+    const back = await bpub.restore(d.stream, d.key, ownerAddress)
+    assert.deepEqual([back.scripts, back.owner, back.sha, back.filename], [d.scripts, d.owner, d.sha, "g.txt"], "an upload resumes from its saved stream")
+    assert.deepEqual(back.content, file)
+    const lib = await buildInscription(file, { mime: "text/plain", filename: "g.txt", compress: true, controlPubkey: secp256k1.getPublicKey(d.key, true) })
+    assert.deepEqual(d.redeem, lib.redeemScripts, "same scripts as the bpub library's own buildInscription")
+    const outs = bpub.fundingOutputs(d, 3)
+    assert.equal(outs.length, d.scripts.length + 1)
+    const funding = new Transaction({ allowUnknownOutputs: true })
+    funding.addInput({ txid: new Uint8Array(32).fill(7), index: 0 })
+    for (const o of [...outs].reverse()) funding.addOutput({ script: hexToBytes(o.script), amount: BigInt(o.amount) })
+    const r = await bpub.reveal(d, funding.hex, ownerAddress, 3)
+    assert.equal(r.fundingTxid, funding.id)
+    assert.ok(bpub.costs(d.scripts.length, 3).refund > 546 && bpub.costs(d.scripts.length, 3).revealFee === r.feeSats, "the reveal refunds more than dust")
+    await assert.rejects(bpub.draft(new Uint8Array(250_000).map(() => Math.random() * 256), { mime: "", filename: "", key: d.key, ownerAddress }), /Too big/)
+  }
   const modA = { ...MODULES[0], id: "check-a", hosts: ["api.example.org"] } as ModuleManifest
   const modB = { ...modA, id: "check-b" }
   await storageSet(modA, "k", { n: 1 })

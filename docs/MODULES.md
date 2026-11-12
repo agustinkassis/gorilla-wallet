@@ -7,7 +7,9 @@ goes through the wallet's own review → sign → broadcast dialog.
 
 `modules/example` is the reference: a block/price ticker (dashboard), an API playground (page) and a "pay yourself"
 transaction type (Send). It's off by default; turn it on in Settings → Modules. `modules/faucet` is a real one: a
-faucet page on Signet, Testnet4 and Testnet3, three instances of one UI with their own faucet lists.
+faucet page on Signet, Testnet4 and Testnet3, three instances of one UI with their own faucet lists. `modules/bitfiles` stores files on
+Blake with the [bpub](https://github.com/bitfiles-io/bpub) protocol (funding through `wallet.send`, a reveal it signs
+with a throwaway key) and links them on bitfiles.io.
 
 ## Anatomy
 
